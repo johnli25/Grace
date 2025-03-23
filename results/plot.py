@@ -31,6 +31,29 @@ def quick_plot_loss(df, label):
         df["ssim_db"] = -10 * np.log10(1 - df["ssim"])
     plt.plot(df["loss"], df["ssim_db"], label=label)
 
+# def interpolate_quality(df, target_size):
+#     """
+#     assume input df has loss, size, ssim
+#     """
+#     if df is None:
+#         print("Skip", label, "during quality interpolation because dataframe is None")
+#         return
+#     df = df.sort_values(['loss', 'size'])
+#     def group_interpolate(group):
+#         return pd.Series({'ssim': np.interp(target_size, group['size'], group['ssim'])})
+    
+
+#     result = df.groupby(["loss"]).apply(group_interpolate)
+
+#     # NOTE: added lines to fix. Drop the 'loss' column if it already exists
+#     if 'loss' in result.columns:
+#         result = result.drop(columns=['loss']) 
+
+#     result = result.reset_index()
+#     result["ssim_db"] = -10 * np.log10(1 - result["ssim"])
+#     return result
+
+
 def interpolate_quality(df, target_size):
     """
     assume input df has loss, size, ssim
@@ -42,19 +65,37 @@ def interpolate_quality(df, target_size):
     def group_interpolate(group):
         return pd.Series({'ssim': np.interp(target_size, group['size'], group['ssim'])})
 
-    result = df.groupby(["loss"]).apply(group_interpolate).reset_index()
+    result = df.groupby(["loss"]).apply(group_interpolate).reset_index(drop=True)
     result["ssim_db"] = -10 * np.log10(1 - result["ssim"])
     return result
 
+
+
+
+# def quick_plot_fec(df, target_size, fec_ratio):
+#     if df is None:
+#         print("Skip", label, "during fec plot because dataframe is None")
+#         return
+#     idf = interpolate_quality(df.groupby(["loss", "model"]).mean().reset_index(), size * (1-fec_ratio))
+#     quality = float(idf["ssim_db"])
+#     x = [0, fec_ratio - 0.01, fec_ratio + 0.01]
+#     y = [quality, quality, 8]
+#     plt.plot(x, y, label=f"{fec_ratio*100:.1f}% FEC")
+
 def quick_plot_fec(df, target_size, fec_ratio):
     if df is None:
-        print("Skip", label, "during fec plot because dataframe is None")
+        print("Skip during fec plot because dataframe is None")
         return
-    idf = interpolate_quality(df.groupby(["loss", "model"]).mean().reset_index(), size * (1-fec_ratio))
-    quality = float(idf["ssim_db"])
+    idf = interpolate_quality(df.groupby(["loss", "model"]).mean().reset_index(), target_size * (1 - fec_ratio))
+    if idf.empty:
+        print("Interpolated dataframe is empty. Skipping plot.")
+        return
+    print(idf["ssim_db"])
+    quality = float(idf["ssim_db"].iloc[0])
     x = [0, fec_ratio - 0.01, fec_ratio + 0.01]
     y = [quality, quality, 8]
     plt.plot(x, y, label=f"{fec_ratio*100:.1f}% FEC")
+
 
 video_filter = "video.str.contains('game')"
 df_grace = read_df("grace/all.csv").query(video_filter)
