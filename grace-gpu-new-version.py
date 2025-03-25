@@ -495,11 +495,11 @@ def init_ae_model(qmap_quality=1):
             # "512": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/512_freeze.model"}, scale_factor=0.5)),
             # "1024": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/1024_freeze.model"}, scale_factor=0.5)),
             # "2048": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/2048_freeze.model"})),
-            # "4096": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/4096_freeze.model"})),
+            "4096": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/4096_freeze.model"})),
             # "6144": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/6144_freeze.model"})),
             # "8192": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/8192_freeze.model"})),
             # "12288": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/12288_freeze.model"})),
-            "16384": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/16384_freeze.model"})),
+            # "16384": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/16384_freeze.model"})),
             }
 
     return models
@@ -625,8 +625,8 @@ def run_one_model(model_id, input_pil_frames, video_id=0, video_name=""):
     os.makedirs(orig_dir, exist_ok=True)
     os.makedirs(decoded_dir, exist_ok=True)
 
-    # orig_frames, codes, dec_frames = encode_whole_video(input_pil_frames, model, model_dir) # NOTE: original line of code 
-    pnsrs, bpps = model.encode_video(input_pil_frames, perfect_iframe=False, use_mpeg=True) # NOTE: I added this
+    orig_frames, codes, dec_frames = encode_whole_video(input_pil_frames, model, model_dir) # NOTE: original line of code 
+    # pnsrs, bpps = model.encode_video(input_pil_frames, perfect_iframe=False, use_mpeg=True) # NOTE: I added this
 
     # Save original and decoded frames
     for idx, (orig, decoded) in enumerate(zip(orig_frames, dec_frames)):
