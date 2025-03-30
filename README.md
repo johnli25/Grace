@@ -72,3 +72,37 @@ python3 plot.py
 ```
 The result will be saved to the pngs in the same folder
 
+Extra Notes (b/c Grace's documentation is poorly documented):
+---
+
+### Summary of Video Loss Processing Code
+
+- **Video Structure:**
+  - **I-Frame:** The very first frame is an I-frame (decoded independently without loss).
+  - **P-Frames:** Every subsequent frame is treated as a P-frame, meaning each relies on a reference frame (the previous decoded frame).
+
+- **Loss Application:**
+  - For each test, the code loops over a set of loss values (e.g., 0, 0.1, 0.2, …, 0.8).
+  - For each loss value, a **loss array** is created:
+    ```python
+    loss_arr = [loss] * nframe
+    ```
+    This produces a list of length `nframe` where every element is the same loss value.
+
+- **Processing by Group (`nframe`):**
+  - **When `nframe = 1`:**
+    - Each P-frame is processed individually.
+    - The reference frame for decoding is the immediately previous decoded frame from `decoded_frames`.
+  - **When `nframe = 3` or `nframe = 5`:**
+    - Frames are processed in consecutive groups.
+    - **First frame in the group:** Uses the decoded frame immediately preceding the group (from `decoded_frames`) as its reference.
+    - **Subsequent frames in the group:** Each damaged (loss-applied) frame becomes the reference for the next frame in the group.
+    - Although grouped, the loss level is identical for all frames in the group because the loss array is uniform.
+
+- **Key Takeaway:**
+  - The grouping (`nframe`) controls how many frames are chained together (and hence how errors might propagate), but it does not vary the loss level applied — every frame in a group gets the same loss value.
+
+---
+
+This summary captures the core points about how the code applies loss and uses reference frames in different group settings.
+
