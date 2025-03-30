@@ -72,7 +72,7 @@ python3 plot.py
 ```
 The result will be saved to the pngs in the same folder
 
-Extra Notes (b/c Grace's documentation is poorly documented):
+Extra Notes (b/c Grace's implementation documentation is extremely poorly documented):
 ---
 
 ### Summary of Video Loss Processing Code
