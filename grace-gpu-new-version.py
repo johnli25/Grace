@@ -116,12 +116,14 @@ def bpg_encode(img):
     _, h, w = frame.shape
     frame2 = frame.permute((1, 2, 0)).flatten()
     bs = frame2.numpy().tobytes()
+    print("bs bytestream/string length is: ", len(bs))
     ubs = (ctypes.c_ubyte * len(bs)).from_buffer(bytearray(bs))
     bpg_encode_bytes(ubs, h, w)
     buflen =  get_buflen()
     buf = get_buf()
     bpg_stream = ctypes.string_at(buf, buflen)
     free_mem(buf)
+    print("bpg_stream length is: ", len(bpg_stream))
     return bpg_stream, h, w, len(bpg_stream)
 
 def bpg_decode(bpg_stream, h, w):
@@ -275,7 +277,10 @@ class AEModel:
         """
         #print("steps:", self.h_step , self.w_step )
         self.frame_counter += 1
+        print("Frame type is: ", frame)
         frame = to_tensor(frame)
+        print("Frame shape is: ", frame.shape)
+        print("isIframe is: ", isIframe)
         if isIframe:
             # torch.cuda.synchronize()
             # start =time.time()
@@ -286,7 +291,7 @@ class AEModel:
             # print("QMAP TIME SPENT IS: ", (end - start) * 1000)
             eframe = EncodedFrame(code, shapex, shapey, "I", self.frame_counter)
             return eframe, size
-        else:
+        else: # if it's P-frame
             assert self.reference_frame is not None
             # use p_index to compute which part to encode the I-frame
             c, h, w = frame.shape
@@ -320,6 +325,7 @@ class AEModel:
             #print(f"P_index = {self.p_index}, w_offset = {w_offset}, h_offset = {h_offset}")
             part_iframe = frame[:, h_offset:h_offset+self.h_step, w_offset:w_offset+self.w_step]
             icode, shapex, shapey, isize = bpg_encode(part_iframe)
+            print("I-part size is: ", isize)    
 
 
             # NOTE: print the tensor shape for debugging + gauge data size for the encoder
@@ -336,7 +342,12 @@ class AEModel:
             if no_index_referesh == False:
                 self.p_index += 1
             # print(eframe.frame_type)
-            return eframe, self.grace_coder.entropy_encode(eframe) + isize
+                
+            # NOTE: im calling self.grace_coder.entropy_encode() twice, so the internal print statement shows up twice. Just ignore
+            encoded_size = self.grace_coder.entropy_encode(eframe)
+            print("Total size of Entropy Encoded P-frame: ", encoded_size)
+            total_p_i_frame_size = encoded_size + isize
+            return eframe, total_p_i_frame_size
 
     def decode_frame(self, eframe:EncodedFrame):
         """
@@ -564,6 +575,7 @@ def encode_whole_video(frames, ae_model: AEModel, output_dir="results/grace"):
     for idx, frame in enumerate(frames):
         size, eframe = encode_frame(ae_model, idx == 0, ref_frame, frame)
         eframe.tot_size = size
+        print("eframes total size is: ", eframe.tot_size, "\n")
         decoded_frame = decode_frame(ae_model, eframe, ref_frame, 0)
 
         # save_image(decoded_frame, os.path.join(frame_dir, f"decoded-{idx:04d}.png"))
@@ -601,7 +613,6 @@ def decode_with_loss(ae_model: AEModel, frame_id, losses, decoded_frames, eframe
 
 
 
-
 models = init_ae_model()
 
 def run_one_model(model_id, input_pil_frames, video_id=0, video_name=""):
@@ -626,6 +637,16 @@ def run_one_model(model_id, input_pil_frames, video_id=0, video_name=""):
     os.makedirs(decoded_dir, exist_ok=True)
 
     orig_frames, codes, dec_frames = encode_whole_video(input_pil_frames, model, model_dir) # NOTE: original line of code 
+   
+    # NOTE Sanity check: 
+    i_frame = codes[0]
+    if i_frame.frame_type == "I":
+        byte_size = i_frame.tot_size
+        print("Verified: This is the I-frame.")
+        print("I-frame byte size (in bytes):", byte_size)
+    else:
+        print("Warning: The first frame is not an I-frame!")
+
     # pnsrs, bpps = model.encode_video(input_pil_frames, perfect_iframe=False, use_mpeg=True) # NOTE: I added this
 
     # Save original and decoded frames
@@ -661,8 +682,9 @@ def run_one_model(model_id, input_pil_frames, video_id=0, video_name=""):
             damaged_frames = []
             df = pd.DataFrame()
             loss_arr = [loss] * nframe
-
+            # print("total_frames, nframe:", total_frames, nframe)
             for frame_id in range(1, total_frames, nframe):
+                # print("  - Running frame_id =", frame_id)
                 damaged = decode_with_loss(model, frame_id, loss_arr, dec_frames, codes)
                 damaged_frames.extend(damaged)
 

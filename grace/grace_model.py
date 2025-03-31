@@ -255,11 +255,43 @@ class GraceEntropyCoder:
         return None, total_bits.item() / 8
 
 
-    def entropy_encode(self, code, shape_mv, shape_res, z, use_estimation = False):
+    # def entropy_encode(self, code, shape_mv, shape_res, z, use_estimation = False):
+    #     """
+    #     Parameter:
+    #         code: a 1-D torch tensor,
+    #               equals to torch.cat([mv.flatten(), residual.flatten()])
+    #         shape_mv: shape of motion vec
+    #         shape_res: shape of residual
+    #     Returns:
+    #         bytestream: it is None
+    #         size: the size of the stream
+    #     """
+    #     code = code.float()
+    #     z = z.float()
+
+    #     mvsize = np.prod(shape_mv)
+    #     ressize = np.prod(shape_res)
+    #     assert mvsize + ressize == torch.numel(code)
+
+
+    #     mv = torch.reshape(code[:mvsize], shape_mv)
+    #     res = torch.reshape(code[mvsize:], shape_res)
+    #     sigma = self.model.respriorDecoder(z)
+
+    #     if use_estimation:
+    #         bs1, sz1 = self.estimate_res(res, sigma)
+    #         bs2, sz2 = self.estimate_mv(mv)
+    #         bs3, sz3 = self.estimate_z(z)
+    #     else:
+    #         bs1, sz1 = self.compress_res(res, sigma)
+    #         bs2, sz2 = self.compress_mv(mv)
+    #         bs3, sz3 = self.compress_z(z)
+    #     return None, sz1 + sz2 + sz3
+    
+    def entropy_encode(self, code, shape_mv, shape_res, z, use_estimation=False):
         """
         Parameter:
-            code: a 1-D torch tensor,
-                  equals to torch.cat([mv.flatten(), residual.flatten()])
+            code: a 1-D torch tensor, equals to torch.cat([mv.flatten(), residual.flatten()])
             shape_mv: shape of motion vec
             shape_res: shape of residual
         Returns:
@@ -269,10 +301,13 @@ class GraceEntropyCoder:
         code = code.float()
         z = z.float()
 
+        # Print the raw size of the latent representation (in bytes)
+        raw_size = code.numel() * code.element_size()
+        print("Raw latent code size in bytes:", raw_size)
+
         mvsize = np.prod(shape_mv)
         ressize = np.prod(shape_res)
         assert mvsize + ressize == torch.numel(code)
-
 
         mv = torch.reshape(code[:mvsize], shape_mv)
         res = torch.reshape(code[mvsize:], shape_res)
@@ -286,7 +321,10 @@ class GraceEntropyCoder:
             bs1, sz1 = self.compress_res(res, sigma)
             bs2, sz2 = self.compress_mv(mv)
             bs3, sz3 = self.compress_z(z)
-        return None, sz1 + sz2 + sz3
+        total_size = sz1 + sz2 + sz3
+        print("Total encoded bytestream size (bytes):", total_size)
+        return None, total_size
+
 
     def entropy_decode(self):
         raise NotImplementedError
