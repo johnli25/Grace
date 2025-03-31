@@ -40,13 +40,6 @@ np.random.seed(0)
 
 df_psnr = None
 
-def create_output_dirs(base_dir):
-    video_dir = os.path.join(base_dir, "grace_videos")
-    frame_dir = os.path.join(base_dir, "grace_frames")
-    os.makedirs(video_dir, exist_ok=True)
-    os.makedirs(frame_dir, exist_ok=True)
-    return video_dir, frame_dir
-
 def print_usage():
     print(
         f"Usage: {sys.argv[0]} <video_file> <output file> <mode> [grace_model]"
@@ -138,7 +131,7 @@ def FFMPEG_PSNR(enc_frames, raw_frames, outfile):
     os.system(f"ffmpeg -i {outfolder}/enc.mp4 -i {outfolder}/raw.mp4 -lavfi psnr=stats_file={outfile}.psnr -f null -")
     os.system(f"ffmpeg -i {outfolder}/enc.mp4 -i {outfolder}/raw.mp4 -lavfi ssim=stats_file={outfile}.ssim -f null -")
 
-    # free_tmp_folder(outfolder)
+    free_tmp_folder(outfolder)
 
 
 def get_block_psnr(frame_id, gt_frame, dec_frame, w_step, h_step):
@@ -448,9 +441,6 @@ class AEModel:
             # encode P part
             # st = time.perf_counter()
             eframe = self.grace_coder.encode(frame, self.reference_frame)
-
-
-
             # torch.cuda.synchronize()
             # ed = time.perf_counter()
             # print("self.grace_coder.encode: ", (ed - st) * 1000)
@@ -463,10 +453,6 @@ class AEModel:
             #print(f"P_index = {self.p_index}, w_offset = {w_offset}, h_offset = {h_offset}")
             part_iframe = frame[:, h_offset:h_offset+self.h_step, w_offset:w_offset+self.w_step]
             icode, shapex, shapey, isize = bpg_encode(part_iframe)
-            
-            # NOTE: print the tensor shape of I-patch 
-            print(f"[P-frame I-part] Encoded patch code length (bytes): {len(icode)}; Patch dims: {shapex} x {shapey}")
-            
             # ed = time.perf_counter()
             # print("self.bpg_encode: ", (ed - st) * 1000)
             ipart = IPartFrame(icode, shapex, shapey, w_offset, h_offset)
@@ -701,7 +687,7 @@ def decode_frame(ae_model: AEModel, eframe: EncodedFrame, ref_frame, loss):
         decoded = ae_model.decode_frame(eframe)
         return decoded
 
-def encode_whole_video(frames, ae_model: AEModel, output_dir="results/grace"):
+def encode_whole_video(frames, ae_model: AEModel):
     """
     Input:
         frames: a list of frames in PIL format
@@ -710,7 +696,6 @@ def encode_whole_video(frames, ae_model: AEModel, output_dir="results/grace"):
         codes: list of EncodedFrame
         dec_frames: list of decoded frame in torch.Tensor
     """
-    video_dir, frame_dir = create_output_dirs(output_dir)
     orig_frames = list(map(to_tensor, frames))
     codes = []
     dec_frames = []
@@ -719,11 +704,9 @@ def encode_whole_video(frames, ae_model: AEModel, output_dir="results/grace"):
         size, eframe = encode_frame(ae_model, idx == 0, ref_frame, frame)
         eframe.tot_size = size
         decoded_frame = decode_frame(ae_model, eframe, ref_frame, 0)
-
         codes.append(eframe)
         dec_frames.append(decoded_frame)
         ref_frame = decoded_frame
-
     return orig_frames, codes, dec_frames
 
 
@@ -759,12 +742,7 @@ def run_one_model(model_id, input_pil_frames):
     df = pd.DataFrame()
     model = models[model_id]
     model.p_index = 0
-
-    # Create model-specific directory
-    model_dir = os.path.join("results/grace", f"model_{model_id}")
-    os.makedirs(model_dir, exist_ok=True)
-
-    orig_frames, codes, dec_frames = encode_whole_video(input_pil_frames, model, model_dir)
+    orig_frames, codes, dec_frames = encode_whole_video(input_pil_frames, model)
     sizes = [code.tot_size for code in codes]
     psnrs = [PSNR(o, d) for o, d in zip(orig_frames, dec_frames)]
     ssims = [SSIM(o, d) for o, d in zip(orig_frames, dec_frames)]
@@ -785,15 +763,9 @@ def run_one_model(model_id, input_pil_frames):
             damaged_frames = []
             df = pd.DataFrame()
             loss_arr = [loss] * nframe
-
-            # Create per-loss-rate directories
-            loss_dir = os.path.join("results/grace", f"loss_{loss}")
-            os.makedirs(loss_dir, exist_ok=True)    
-
             for frame_id in range(1, total_frames, nframe):
                 damaged = decode_with_loss(model, frame_id, loss_arr, dec_frames, codes)
                 damaged_frames.extend(damaged)
-
             df["size"] = [eframe.tot_size for eframe in codes[1:]]
             df["psnr"] = [PSNR(o, d) for o, d in zip(orig_frames[1:], damaged_frames)]
             df["ssim"] = [SSIM(o, d) for o, d in zip(orig_frames[1:], damaged_frames)]
@@ -842,7 +814,7 @@ def run_one_file(index_file, output_dir):
             video_df = run_one_video(video)
             video_df["video"] = video_basename
             video_df.to_csv(f"{output_dir}/{video_basename}.csv", index=None)
-            video_dfs.append(video_df)
+        video_dfs.append(video_df)
 
     final_df = pd.concat(video_dfs)
     final_df.to_csv(f"{output_dir}/all.csv", index=None)

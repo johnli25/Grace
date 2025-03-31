@@ -34,12 +34,12 @@ def create_output_dirs(base_dir):
     return video_dir, frame_dir
 
 
-def PSNR(Y1_raw, Y1_com):
+def PSNR(Y1_raw, Y1_com): # also return MSE for speedup
     Y1_com = Y1_com.to(Y1_raw.device)
     log10 = torch.log(torch.FloatTensor([10])).squeeze(0).to(Y1_raw.device)
     train_mse = torch.mean(torch.pow(Y1_raw - Y1_com, 2))
     quality = 10.0*torch.log(1/train_mse)/log10
-    return float(quality)
+    return float(quality), train_mse.item()
 
 def SSIM(Y1_raw, Y1_com):
     #y1 = Y1_raw.permute([1,2,0]).cpu().detach().numpy()
@@ -299,19 +299,11 @@ class AEModel:
                 raise RuntimeError("w_step and h_step need to divide W and H")
 
             # torch.cuda.synchronize()
-            # print("IPatch size is: ", self.h_step, self.w_step)
-            # icode, shapex, shapey, isize = self.qmap_coder.encode(part_iframe)
 
             # encode P part
             # st = time.perf_counter()
             eframe = self.grace_coder.encode(frame, self.reference_frame)
 
-
-            # NOTE: print the tensor shape of P-Frame for debugging + gauge data size for the encoder
-            # if hasattr(eframe, 'code') and isinstance(eframe.code, torch.Tensor):
-            #     print(f"[P-frame] Bottleneck tensor shape: {eframe.code.shape} for frame {self.frame_counter}")
-            # else:
-            #     print("[P-frame] No tensor found in eframe.code for frame", self.frame_counter)
 
             # torch.cuda.synchronize()
             # ed = time.perf_counter()
@@ -326,11 +318,6 @@ class AEModel:
             part_iframe = frame[:, h_offset:h_offset+self.h_step, w_offset:w_offset+self.w_step]
             icode, shapex, shapey, isize = bpg_encode(part_iframe)
             print("I-part size is: ", isize)    
-
-
-            # NOTE: print the tensor shape for debugging + gauge data size for the encoder
-            # print(f"[P-frame I-part] Encoded patch code length (bytes): {len(icode)}; Patch dims: {shapex} x {shapey} for frame {self.frame_counter}")
-
 
             # ed = time.perf_counter()
             # print("self.bpg_encode: ", (ed - st) * 1000)
@@ -500,7 +487,7 @@ def init_ae_model(qmap_quality=1):
 
     GRACE_MODEL = "models/grace"
     models = {
-            # "64": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/64_freeze.model"}, scale_factor=0.25)),
+            "64": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/64_freeze.model"}, scale_factor=0.25)),
             # "128": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/128_freeze.model"}, scale_factor=0.5)),
             # "256": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/256_freeze.model"}, scale_factor=0.5)),
             # "512": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/512_freeze.model"}, scale_factor=0.5)),
@@ -655,27 +642,29 @@ def run_one_model(model_id, input_pil_frames, video_id=0, video_name=""):
         save_image(decoded, os.path.join(decoded_dir, f"decoded-{idx:04d}.png"))
 
     # Create videos from saved frames
-    os.system(f"ffmpeg -y -i {orig_dir}/orig-%04d.png -c:v libx264 {orig_dir}/output.mp4")
-    os.system(f"ffmpeg -y -i {decoded_dir}/decoded-%04d.png -c:v libx264 {decoded_dir}/output.mp4")
+    # os.system(f"ffmpeg -y -r {10} -i {orig_dir}/orig-%04d.png -c:v libx264 {orig_dir}/output.mp4")
+    # os.system(f"ffmpeg -y -r {10} -i {decoded_dir}/decoded-%04d.png -c:v libx264 {decoded_dir}/output.mp4")
 
     ### NOTE: COMMENT out all writing/saving to .csv files
-    # sizes = [code.tot_size for code in codes]
-    # psnrs = [PSNR(o, d) for o, d in zip(orig_frames, dec_frames)]
-    # ssims = [SSIM(o, d) for o, d in zip(orig_frames, dec_frames)]
-    # frame_ids = np.arange(0, total_frames_count)
-    # df["size"] = sizes
-    # df["psnr"] = psnrs
-    # df["ssim"] = ssims
-    # df["loss"] = 0
-    # df["frame_id"] = frame_ids
-    # df["nframes"] = 0
-    # #print(df)
-    # dfs.append(df)
+    sizes = [code.tot_size for code in codes]
+    psnrs = [PSNR(o, d)[0] for o, d in zip(orig_frames, dec_frames)]
+    ssims = [SSIM(o, d) for o, d in zip(orig_frames, dec_frames)]
+    mses = [PSNR(o, d)[1] for o, d in zip(orig_frames, dec_frames)]
+    frame_ids = np.arange(0, len(input_pil_frames))
+    df["size"] = sizes
+    df["mse"] = mses
+    df["psnr"] = psnrs
+    df["ssim"] = ssims
+    df["loss"] = 0
+    df["frame_id"] = frame_ids
+    df["nframes"] = 0
+    #print(df)
+    dfs.append(df)
 
     def run_multi_frame_losses(nframe, total_frames):
         dfs = []
         print("  - Running consecutive loss nframe =", nframe)
-        for loss in [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]:
+        for loss in [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
             loss_dir = os.path.join(model_dir, f"loss_{loss:.1f}_nframes={nframe}")
             os.makedirs(loss_dir, exist_ok=True)
 
@@ -694,21 +683,22 @@ def run_one_model(model_id, input_pil_frames, video_id=0, video_name=""):
                     save_image(damaged_frame, os.path.join(loss_dir, f"damaged-{frame_id+idx:04d}.png"))
 
             # Create damaged video
-            os.system(f"ffmpeg -y -i {loss_dir}/damaged-%04d.png -c:v libx264 {loss_dir}/output.mp4")
+            # os.system(f"ffmpeg -y -r {10} -i {loss_dir}/damaged-%04d.png -c:v libx264 {loss_dir}/output.mp4")
 
-        #     df["size"] = [eframe.tot_size for eframe in codes[1:]]
-        #     df["psnr"] = [PSNR(o, d) for o, d in zip(orig_frames[1:], damaged_frames)]
-        #     df["ssim"] = [SSIM(o, d) for o, d in zip(orig_frames[1:], damaged_frames)]
-        #     df["loss"] = loss
-        #     df["frame_id"] = np.arange(1, total_frames)
-        #     df["nframes"] = nframe
-        #     dfs.append(df)
-        # return pd.concat(dfs)
+            df["size"] = [eframe.tot_size for eframe in codes[1:]]
+            df["mse"] = [PSNR(o, d)[1] for o, d in zip(orig_frames[1:], damaged_frames)]
+            df["psnr"] = [PSNR(o, d)[0] for o, d in zip(orig_frames[1:], damaged_frames)]
+            df["ssim"] = [SSIM(o, d) for o, d in zip(orig_frames[1:], damaged_frames)]
+            df["loss"] = loss
+            df["frame_id"] = np.arange(1, total_frames)
+            df["nframes"] = nframe
+            dfs.append(df)
+        return pd.concat(dfs)
     print("len(input_pil_frames):", len(input_pil_frames))
     dfs += [run_multi_frame_losses(1, len(input_pil_frames))] # instead of 16, use the total number of frames in video (denoted by len(input_pil_frames))!
     dfs += [run_multi_frame_losses(3, len(input_pil_frames))]
     dfs += [run_multi_frame_losses(5, len(input_pil_frames))]
-    return None 
+    # return None 
 
     #run_multi_frame_losses(3, 16)
     #run_multi_frame_losses(5, 16)
@@ -721,12 +711,12 @@ def run_one_video(video, video_id):
     dfs = []
     for model_id in models.keys():
         print("  Running model:", model_id)
-        # df = run_one_model(model_id, input_frames, video_id, video)
-        run_one_model(model_id, input_frames, video_id, video)
-        # df["model_id"] = model_id
-        # dfs.append(df)
+        df = run_one_model(model_id, input_frames, video_id, video)
+        # run_one_model(model_id, input_frames, video_id, video)
+        df["model_id"] = model_id
+        dfs.append(df)
 
-    return None
+    # return None
     # NOTE: COMMENT out all writing/saving to .csv files
     final_df = pd.concat(dfs)
     return final_df
@@ -745,26 +735,25 @@ def run_one_file(index_file, output_dir):
     for idx, video in enumerate(videos):
         print(f"\033[33mRunning video: {video}, index: {idx}\033[0m")
         run_one_video(video, idx)
-    return None
+    # return None
 
     ### NOTE: COMMENT out all writing/saving to .csv files 
     video_dfs = []
     for idx, video in enumerate(videos):
         print(f"\033[33mRunning video: {video}, index: {idx}\033[0m")
         video_basename = os.path.basename(video)
-        # if os.path.exists(f"{output_dir}/{video_basename}.csv"):
-        #     print(f"Skip the finished video: {video}")
-        #     video_df = pd.read_csv(f"{output_dir}/{video_basename}.csv")
-        # else:
-        video_df = run_one_video(video, idx)
-        video_df["video"] = video_basename
-        video_df.to_csv(f"{output_dir}/{video_basename}.csv", index=None)
-        video_dfs.append(video_df)
+        if os.path.exists(f"{output_dir}/{video_basename}_v2.csv"):
+            print(f"Skip the finished video: {video}")
+            video_df = pd.read_csv(f"{output_dir}/{video_basename}_v2.csv")
+        else:
+            video_df = run_one_video(video, idx)
+            video_df["video"] = video_basename
+            video_df.to_csv(f"{output_dir}/{video_basename}_v2.csv", index=None)
+            video_dfs.append(video_df)
 
     final_df = pd.concat(video_dfs)
     final_df.to_csv(f"{output_dir}/all.csv", index=None)
     return final_df
-
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
