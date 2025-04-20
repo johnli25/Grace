@@ -18,6 +18,8 @@ from PIL import Image, ImageFile, ImageFilter
 # from skimage.metrics import structural_similarity as ssim
 import random
 from pytorch_msssim import ssim, ms_ssim, SSIM, MS_SSIM
+from torchvision import transforms
+
 
 torch.manual_seed(0)
 random.seed(0)
@@ -34,8 +36,19 @@ def create_output_dirs(base_dir):
     return video_dir, frame_dir
 
 
+def resize_to_224(image):
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((224, 224)),
+        transforms.ToTensor()
+    ])
+    return transform(image)
+
 def PSNR(Y1_raw, Y1_com): # also return MSE for speedup
-    Y1_com = Y1_com.to(Y1_raw.device)
+    # Y1_com = Y1_com.to(Y1_raw.device)
+    Y1_raw = resize_to_224(Y1_raw)
+    Y1_com = resize_to_224(Y1_com).to(Y1_raw.device)
+
     log10 = torch.log(torch.FloatTensor([10])).squeeze(0).to(Y1_raw.device)
     train_mse = torch.mean(torch.pow(Y1_raw - Y1_com, 2))
     quality = 10.0*torch.log(1/train_mse)/log10
@@ -45,6 +58,8 @@ def SSIM(Y1_raw, Y1_com):
     #y1 = Y1_raw.permute([1,2,0]).cpu().detach().numpy()
     #y2 = Y1_com.permute([1,2,0]).cpu().detach().numpy()
     #return ssim(y1, y2, multichannel=True)
+    # Y1_raw = resize_to_224(Y1_raw).float().cuda().unsqueeze(0)
+    # Y1_com = resize_to_224(Y1_com).float().unsqueeze(0)
     return float(ssim( Y1_raw.float().cuda().unsqueeze(0), Y1_com.float().unsqueeze(0), data_range=1, size_average=False).cpu().detach()) 
 
 
@@ -664,7 +679,7 @@ def run_one_model(model_id, input_pil_frames, video_id=0, video_name=""):
     def run_multi_frame_losses(nframe, total_frames):
         dfs = []
         print("  - Running consecutive loss nframe =", nframe)
-        for loss in [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+        for loss in [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.88]:
             loss_dir = os.path.join(model_dir, f"loss_{loss:.1f}_nframes={nframe}")
             os.makedirs(loss_dir, exist_ok=True)
 
@@ -742,13 +757,13 @@ def run_one_file(index_file, output_dir):
     for idx, video in enumerate(videos):
         print(f"\033[33mRunning video: {video}, index: {idx}\033[0m")
         video_basename = os.path.basename(video)
-        if os.path.exists(f"{output_dir}/{video_basename}_v2.csv"):
+        if os.path.exists(f"{output_dir}/{video_basename}_v_resized224.csv"):
             print(f"Skip the finished video: {video}")
-            video_df = pd.read_csv(f"{output_dir}/{video_basename}_v2.csv")
+            video_df = pd.read_csv(f"{output_dir}/{video_basename}_v_resized224.csv")
         else:
             video_df = run_one_video(video, idx)
             video_df["video"] = video_basename
-            video_df.to_csv(f"{output_dir}/{video_basename}_v2.csv", index=None)
+            video_df.to_csv(f"{output_dir}/{video_basename}_v_resized224.csv", index=None)
             video_dfs.append(video_df)
 
     final_df = pd.concat(video_dfs)
