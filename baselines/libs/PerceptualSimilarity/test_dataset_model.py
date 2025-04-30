@@ -1,4 +1,4 @@
-import numpy as np
+ import numpy as np
 from models import dist_model as dm
 from data import data_loader as dl
 import argparse

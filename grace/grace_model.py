@@ -303,7 +303,7 @@ class GraceEntropyCoder:
 
         # Print the raw size of the latent representation (in bytes)
         raw_size = code.numel() * code.element_size()
-        print("Raw latent code size in bytes:", raw_size)
+        # print("Raw latent code size in bytes:", raw_size)
 
         mvsize = np.prod(shape_mv)
         ressize = np.prod(shape_res)
@@ -322,7 +322,7 @@ class GraceEntropyCoder:
             bs2, sz2 = self.compress_mv(mv)
             bs3, sz3 = self.compress_z(z)
         total_size = sz1 + sz2 + sz3
-        print("Total encoded bytestream size (bytes):", total_size)
+        # print("Total encoded bytestream size (bytes):", total_size)
         return None, total_size
 
 

@@ -131,14 +131,14 @@ def bpg_encode(img):
     _, h, w = frame.shape
     frame2 = frame.permute((1, 2, 0)).flatten()
     bs = frame2.numpy().tobytes()
-    print("bs bytestream/string length is: ", len(bs))
+    # print("bs bytestream/string length is: ", len(bs))
     ubs = (ctypes.c_ubyte * len(bs)).from_buffer(bytearray(bs))
     bpg_encode_bytes(ubs, h, w)
     buflen =  get_buflen()
     buf = get_buf()
     bpg_stream = ctypes.string_at(buf, buflen)
     free_mem(buf)
-    print("bpg_stream length is: ", len(bpg_stream))
+    # print("bpg_stream length is: ", len(bpg_stream))
     return bpg_stream, h, w, len(bpg_stream)
 
 def bpg_decode(bpg_stream, h, w):
@@ -292,10 +292,10 @@ class AEModel:
         """
         #print("steps:", self.h_step , self.w_step )
         self.frame_counter += 1
-        print("Frame type is: ", frame)
+        # print("Frame type is: ", frame)
         frame = to_tensor(frame)
-        print("Frame shape is: ", frame.shape)
-        print("isIframe is: ", isIframe)
+        # print("Frame shape is: ", frame.shape)
+        # print("isIframe is: ", isIframe)
         if isIframe:
             # torch.cuda.synchronize()
             # start =time.time()
@@ -332,7 +332,7 @@ class AEModel:
             #print(f"P_index = {self.p_index}, w_offset = {w_offset}, h_offset = {h_offset}")
             part_iframe = frame[:, h_offset:h_offset+self.h_step, w_offset:w_offset+self.w_step]
             icode, shapex, shapey, isize = bpg_encode(part_iframe)
-            print("I-part size is: ", isize)    
+            # print("I-part size is: ", isize)    
 
             # ed = time.perf_counter()
             # print("self.bpg_encode: ", (ed - st) * 1000)
@@ -347,7 +347,7 @@ class AEModel:
                 
             # NOTE: im calling self.grace_coder.entropy_encode() twice, so the internal print statement shows up twice. Just ignore
             encoded_size = self.grace_coder.entropy_encode(eframe)
-            print("Total size of Entropy Encoded P-frame: ", encoded_size)
+            # print("Total size of Entropy Encoded P-frame: ", encoded_size)
             total_p_i_frame_size = encoded_size + isize
             return eframe, total_p_i_frame_size
 
@@ -507,7 +507,7 @@ def init_ae_model(qmap_quality=1):
             # "256": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/256_freeze.model"}, scale_factor=0.5)),
             # "512": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/512_freeze.model"}, scale_factor=0.5)),
             # "1024": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/1024_freeze.model"}, scale_factor=0.5)),
-            # "2048": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/2048_freeze.model"})),
+            "2048": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/2048_freeze.model"})),
             "4096": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/4096_freeze.model"})),
             # "6144": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/6144_freeze.model"})),
             # "8192": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/8192_freeze.model"})),
@@ -688,7 +688,7 @@ def run_one_model(model_id, input_pil_frames, video_id=0, video_name=""):
             loss_arr = [loss] * nframe
             # print("total_frames, nframe:", total_frames, nframe)
             for frame_id in range(1, total_frames, nframe):
-                # print("  - Running frame_id =", frame_id)
+                # print(" - Running frame_id =", frame_id)
                 damaged = decode_with_loss(model, frame_id, loss_arr, dec_frames, codes)
                 damaged_frames.extend(damaged)
 
@@ -770,6 +770,7 @@ def run_one_file(index_file, output_dir):
     final_df.to_csv(f"{output_dir}/all.csv", index=None)
     return final_df
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(device)
-run_one_file("INDEX.txt", "results/grace")
+if __name__ == "__main__":
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(device)
+    run_one_file("INDEX.txt", "results/grace")
