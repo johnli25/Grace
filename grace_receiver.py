@@ -10,6 +10,7 @@ def save_img(rgb_tensor, outdir, idx):
     img_array = np.clip(img_array, 0, 255).astype(np.uint8)
     Image.fromarray(img_array).save(os.path.join(outdir, f"frame_{idx:04d}.png"))
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, required=True)
@@ -21,7 +22,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    model = init_ae_model()["4096"]
+    model = init_ae_model()["1024"]
     model.set_gop(8)
 
     if os.path.exists(args.output):
@@ -39,7 +40,8 @@ def main():
     deadline_ms = args.deadline_ms
 
     packet_buffer = defaultdict(dict)     # frame_idx -> {packet_id: bytes}
-    frame_timestamps = {}                # frame_idx -> timestamp
+    # frame_timestamps = {}                # frame_idx -> timestamp
+    frame_timestamp = None
 
     while True:
         try:
@@ -56,19 +58,19 @@ def main():
                 print(f"[receiver] Malformed packet: got {len(data)} bytes, expected {data_len}")
                 continue
 
-            if frame_idx not in frame_timestamps:
-                frame_timestamps[frame_idx] = time.monotonic_ns() / 1e6  # in ms
+            if frame_timestamp is None:
+                frame_timestamp = time.monotonic_ns() / 1e6
 
             packet_buffer[frame_idx][packet_id] = data
 
             if len(packet_buffer[frame_idx]) == packet_count:
                 now = time.monotonic_ns() / 1e6
-                delay = now - frame_timestamps[frame_idx]
+                delay = now - frame_timestamp
 
                 if delay > deadline_ms:
                     print(f"[receiver:drop] Frame {frame_idx} exceeded deadline ({delay:.2f} ms), dropping.")
                     del packet_buffer[frame_idx]
-                    del frame_timestamps[frame_idx]
+                    # del frame_timestamps[frame_idx]
                     continue
 
                 print(f"[receiver] Assembling frame {frame_idx} after {delay:.2f} ms")
@@ -76,6 +78,7 @@ def main():
                 all_data = b"".join([packet_buffer[frame_idx][i] for i in range(packet_count)])
                 raw = zlib.decompress(all_data)
                 eframe = pickle.loads(raw)
+                # eframe = deserialize_eframe(raw, device=device)
 
                 start_decode = time.monotonic() * 1000
                 recon = decode_frame(model, eframe, ref_frame, loss=0.0) # TODO: change/update this loss value! 
@@ -87,8 +90,9 @@ def main():
                 ref_frame = recon.detach()
 
                 del packet_buffer[frame_idx]
-                del frame_timestamps[frame_idx]
+                # del frame_timestamps[frame_idx]
                 cur_frame = frame_idx + 1
+                frame_timestamp = None
 
         except socket.timeout:
             # Optional: flush incomplete old frames here
