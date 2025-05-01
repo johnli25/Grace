@@ -84,7 +84,7 @@ def main():
             # eframe = deserialize_eframe(raw)
             # decoded_img = model.decode(eframe)
             decoded_img_0_loss = decode_frame(model, eframe, ref_tensor, loss=0.0)
-            decoded_img = decode_frame(model, eframe, ref_tensor, loss=0.5)
+            decoded_img = decode_frame(model, eframe, ref_tensor, loss=0.0)
             ref_tensor = decoded_img_0_loss
             save_img(decoded_img, "grace_sender_frames/", frame_idx)
         frame_idx += 1
