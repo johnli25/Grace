@@ -28,6 +28,7 @@ class GraceBasicCode:
     def apply_loss(self, loss, no_use=None):
         leng = torch.numel(self.code)
 
+        print("loss and length: ", loss, leng)
         rnd = torch.rand(leng).to(self.code.device)
         rnd = (rnd > loss).long()
         rnd = rnd[:leng].reshape(self.code.shape)

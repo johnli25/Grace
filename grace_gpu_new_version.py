@@ -180,6 +180,7 @@ class EncodedFrame:
         """
         leng = torch.numel(self.code)
         nblocks = (leng - 1) // blocksize + 1
+        print("leng, nblocks, blocksize:", leng, nblocks, blocksize)
 
         rnd = torch.rand(nblocks).to(self.code.device)
         rnd = (rnd > loss_ratio).long()
@@ -555,6 +556,7 @@ def decode_frame(ae_model: AEModel, eframe: EncodedFrame, ref_frame, loss):
         decoded = ae_model.decode_frame(eframe)
         return decoded
     else:
+        print("P frame loss is: ", loss)
         eframe.apply_loss(loss, 1)
         ae_model.update_reference(ref_frame)
         decoded = ae_model.decode_frame(eframe)
@@ -608,6 +610,7 @@ def decode_with_loss(ae_model: AEModel, frame_id, losses, decoded_frames, eframe
     for idx, loss in enumerate(losses):
         eframe = copy.deepcopy(eframes[frame_id + idx]) if frame_id + idx < len(eframes) else eframes[-1]
         damaged_frame = decode_frame(ae_model, eframe, ref_frame, loss)
+        print("type:", type(damaged_frame))
         damaged.append(damaged_frame)
         ref_frame = damaged_frame
     # print("losses and damaged length:", losses, damaged, len(damaged))

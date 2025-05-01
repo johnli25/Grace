@@ -42,6 +42,7 @@ def main():
     packet_buffer = defaultdict(dict)     # frame_idx -> {packet_id: bytes}
     # frame_timestamps = {}                # frame_idx -> timestamp
     frame_timestamp = None
+    current_
 
     while True:
         try:
@@ -63,17 +64,10 @@ def main():
 
             packet_buffer[frame_idx][packet_id] = data
 
-            if len(packet_buffer[frame_idx]) == packet_count:
-                now = time.monotonic_ns() / 1e6
-                delay = now - frame_timestamp
+            now = time.monotonic_ns() / 1e6
+            delay = now - frame_timestamp
+            if len(packet_buffer[frame_idx]) == packet_count or delay > deadline_ms:
 
-                if delay > deadline_ms:
-                    print(f"[receiver:drop] Frame {frame_idx} exceeded deadline ({delay:.2f} ms), dropping.")
-                    del packet_buffer[frame_idx]
-                    # del frame_timestamps[frame_idx]
-                    continue
-
-                print(f"[receiver] Assembling frame {frame_idx} after {delay:.2f} ms")
 
                 all_data = b"".join([packet_buffer[frame_idx][i] for i in range(packet_count)])
                 raw = zlib.decompress(all_data)
