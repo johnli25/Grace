@@ -42,7 +42,6 @@ def main():
     packet_buffer = defaultdict(dict)     # frame_idx -> {packet_id: bytes}
     # frame_timestamps = {}                # frame_idx -> timestamp
     frame_timestamp = None
-    current_
 
     while True:
         try:

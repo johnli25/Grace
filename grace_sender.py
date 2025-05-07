@@ -6,12 +6,8 @@ import torch
 import numpy as np
 import cv2
 import os, time
+import random
 
-def split_into_chunks(data: bytes, n_chunks: int) -> list:
-    """Splits data into n_chunks of nearly equal size."""
-    chunk_size = len(data) // n_chunks
-    return [data[i * chunk_size: (i + 1) * chunk_size] if i < n_chunks - 1 else data[i * chunk_size:]
-            for i in range(n_chunks)]
 
 def save_img(rgb_tensor, outdir, idx):
     img_array = rgb_tensor.permute(1, 2, 0).cpu().numpy() * 255.0
@@ -23,12 +19,11 @@ def main():
     parser.add_argument("--input", required=True, help="path to video file")
     parser.add_argument("--ip", required=True)
     parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--npackets", type=int, default=32, help="Number of packets to split each frame into")
     args = parser.parse_args()
 
     # 1) Init model
     models = init_ae_model()
-    model = models["1024"]
+    model = models["64"]
     model.set_gop(8)
 
     # 2) Open video & socket
@@ -38,6 +33,7 @@ def main():
 
     frame_idx = 0
     INPUT_SIZE = (256, 256)
+    BLOCK_SIZE = 32 * 32 # 32x32 = 1024
 
     os.makedirs("grace_sender_frames/", exist_ok=True)
 
@@ -57,36 +53,77 @@ def main():
             ref_tensor = torch.tensor(np.array(pil_img)).permute(2, 0, 1).float() / 255.0
 
         # Encode using GRACE
-        size, eframe = encode_frame(model, frame_idx == 0, ref_tensor, pil_img)
+        size, eframe = encode_frame(model, frame_idx == 0, ref_tensor, pil_img) # frame_idx == 0 means: if frame_idx == 0 AKA -> I-frame --> True; else --> P-frame = false 
+        print("theoretical (entropy-encoded apparently??) size:", size)
+        total_bytes_sent = 0
 
-        # Serialize + compress
-        raw = pickle.dumps(eframe)
-        # raw = serialize_eframe(eframe)
-        comp = zlib.compress(raw)
+        # Prepare for sending
+        if eframe.frame_type == "I":
+            # Step 1)
+            print("frame_idx", frame_idx, "is an I-frame")
+            # eframe.code is a bytes object
+            raw_bytes = eframe.code                 # already a BPG bytestream
+            compressed_payload = zlib.compress(raw_bytes)
+            # pack it as a single “I-frame code” packet (type=2)
+            header = struct.pack("!IIIII",
+                            frame_idx,   # which frame
+                            1,           # exactly one packet
+                            0,           # packet index 0
+                            2,           # custom type=2 --> I-frame code
+                            len(compressed_payload))
+            sock.sendto(header + compressed_payload, dest)
+            total_bytes_sent += len(compressed_payload)
+            print(f"Sent I-frame {frame_idx} in {total_bytes_sent} bytes")
 
-        # Split into npackets chunks
-        chunks = split_into_chunks(comp, args.npackets)
-        print("chunks:", len(chunks), "total size:", len(comp))
+        else: # P-frame
+            # Step 1.5) 
+            code_flat = eframe.code.flatten()
+            n_blocks = (code_flat.numel() - 1) // BLOCK_SIZE + 1
+            code_blocks = code_flat.split(BLOCK_SIZE)
 
-        for packet_id, chunk in enumerate(chunks):
-            header = struct.pack("!IIII", frame_idx, packet_id, args.npackets, len(chunk))
-            # print("size of entire packet: ", len(header) + len(chunk))
-            sock.sendto(header + chunk, dest)
+            # Step 2) Encode subsequent P-frame as blocks
+            print("code blocks:", len(code_blocks))
+            for blk_idx, block in enumerate(code_blocks):
+                payload = pickle.dumps(block) 
+                compressed_payload = zlib.compress(payload)
+
+                header = struct.pack("!IIIII", 
+                                    frame_idx, 
+                                    n_blocks,
+                                    blk_idx, 
+                                    0, # type 0 = P-frame code-block
+                                    len(compressed_payload)) 
+                sock.sendto(header + compressed_payload, dest)
+                total_bytes_sent += len(compressed_payload)
+
+            # Step 3) send I-part as its own packet 
+            if eframe.ipart is not None:
+                ipayload = pickle.dumps(eframe.ipart) 
+                icompressed_payload = zlib.compress(ipayload)
+                header = struct.pack("!IIIII", 
+                                    frame_idx, 
+                                    1,
+                                    0, # block index 0 for I-part
+                                    1, # type 1 = I-part
+                                    len(icompressed_payload))
+                sock.sendto(header + icompressed_payload, dest)
+                # print(f"Sent I-part for frame {frame_idx} in {len(icompressed_payload)} bytes")
+                total_bytes_sent += len(icompressed_payload) 
+            # print(f"Sent {len(code_blocks)} P-frame blocks for frame {frame_idx} in {total_bytes_sent} bytes")
 
         end_time = time.monotonic_ns() / 1e6
-        print(f"Sent frame {frame_idx} ({size} bytes, {len(comp)} compressed) in {end_time - start_time:.2f} ms")
+        print(f"Sent frame {frame_idx} with {total_bytes_sent} bytes in {end_time - start_time:.6f} ms")
 
-        # NOTE: SANITY CHECK: save all frames, simulating receiver
+        # NOTE: OPTIONAL SANITY CHECK: save all frames, simulating receiver
         if frame_idx == 0:
             save_img(ref_tensor, "grace_sender_frames/", frame_idx)
         else:
-            # Decode the received data
-            # eframe = deserialize_eframe(raw)
-            # decoded_img = model.decode(eframe)
-            decoded_img_0_loss = decode_frame(model, eframe, ref_tensor, loss=0.0)
-            decoded_img = decode_frame(model, eframe, ref_tensor, loss=50.0)
-            ref_tensor = decoded_img_0_loss
-            save_img(decoded_img, "grace_sender_frames/", frame_idx)
+            loss_ratio = random.random()       # float in [0.0, 1.0)
+            # decode under that simulated loss
+            recon = decode_frame(model, eframe, ref_tensor, loss=0)
+            ref_tensor = recon.detach() # update reference for the next P‐frame
+            save_img(recon, "grace_sender_frames/", frame_idx)
+
         frame_idx += 1
 
     sock.close()

@@ -28,7 +28,6 @@ class GraceBasicCode:
     def apply_loss(self, loss, no_use=None):
         leng = torch.numel(self.code)
 
-        print("loss and length: ", loss, leng)
         rnd = torch.rand(leng).to(self.code.device)
         rnd = (rnd > loss).long()
         rnd = rnd[:leng].reshape(self.code.shape)
@@ -72,7 +71,7 @@ class GraceInterface:
             a number that is the length of encoded bytestream
         """
         # print("GraceBasicCode code info: ", code.code.shape, code.shapex, code.shapey, code.code.size)
-        return self.ecmodel.entropy_encode(code.code, code.shapex, code.shapey, code.z, use_estimation=True)[1]
+        return self.ecmodel.entropy_encode(code.code, code.shapex, code.shapey, code.z, use_estimation=False)[1] # toggle use_estimation true or false
 
     def decode(self, code: GraceBasicCode, refer_frame: torch.Tensor) -> torch.Tensor:
         """

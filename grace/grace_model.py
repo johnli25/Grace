@@ -207,13 +207,12 @@ class GraceEntropyCoder:
             cdfs.append(gaussian.cdf(torch.tensor(i - 0.5)).view(n,c,h,w,1))
 
 
-        cdfs = torch.cat(cdfs, 4).detach()
+        cdfs = torch.cat(cdfs, 4).detach().cpu()
         tmp = res.cpu().detach().to(torch.int16)
 
         #byte_stream = torchac.encode_float_cdf(cdfs, res.cpu().detach().to(torch.int16), check_input_bounds=True)
         byte_stream = torchac.encode_float_cdf(cdfs, tmp, check_input_bounds=False)
         size_in_bytes = len(byte_stream)
-
 
         return byte_stream, size_in_bytes
 
@@ -321,9 +320,12 @@ class GraceEntropyCoder:
             bs1, sz1 = self.compress_res(res, sigma)
             bs2, sz2 = self.compress_mv(mv)
             bs3, sz3 = self.compress_z(z)
+            # print("actually compress")
         total_size = sz1 + sz2 + sz3
-        # print("Total encoded bytestream size (bytes):", total_size)
-        return None, total_size
+        print("Total encoded bytestream size (bytes):", total_size)
+        bytestream = bs1 + bs2 + bs3 # NOTE: added this line
+        print("Bytestream size (bytes):", len(bytestream))
+        return bytestream, total_size
 
 
     def entropy_decode(self):

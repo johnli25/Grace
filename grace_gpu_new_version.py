@@ -281,7 +281,6 @@ class AEModel:
         return ipart, isize
 
     def encode_frame(self, frame, isIframe = False, no_index_referesh=False):
-
         """
         Input:
             frame: the PIL image
