@@ -305,7 +305,7 @@ class AEModel:
             # end =time.time()
             # print("QMAP TIME SPENT IS: ", (end - start) * 1000)
             eframe = EncodedFrame(code, shapex, shapey, "I", self.frame_counter)
-            return eframe, size
+            return eframe, size, eframe
         else: # if it's P-frame
             assert self.reference_frame is not None
             # use p_index to compute which part to encode the I-frame
@@ -346,10 +346,10 @@ class AEModel:
             # print(eframe.frame_type)
                 
             # NOTE: im calling self.grace_coder.entropy_encode() twice, so the internal print statement shows up twice. Just ignore
-            encoded_size = self.grace_coder.entropy_encode(eframe)
+            encoded_stream, encoded_size = self.grace_coder.entropy_encode(eframe)
             # print("Total size of Entropy Encoded P-frame: ", encoded_size)
             total_p_i_frame_size = encoded_size + isize
-            return eframe, total_p_i_frame_size
+            return eframe, total_p_i_frame_size, encoded_stream
 
     def decode_frame(self, eframe:EncodedFrame):
         """
@@ -533,8 +533,8 @@ def encode_frame(ae_model: AEModel, is_iframe, ref_frame, new_frame, no_index_re
         if not is_iframe:
             raise RuntimeError("Cannot encode a P-frame without reference frame")
 
-    eframe, size = ae_model.encode_frame(new_frame, is_iframe)
-    return size, eframe
+    eframe, size, entropy_encoded_eframe = ae_model.encode_frame(new_frame, is_iframe)
+    return size, eframe, entropy_encoded_eframe
 
 def decode_frame(ae_model: AEModel, eframe: EncodedFrame, ref_frame, loss):
     """
@@ -555,7 +555,7 @@ def decode_frame(ae_model: AEModel, eframe: EncodedFrame, ref_frame, loss):
         decoded = ae_model.decode_frame(eframe)
         return decoded
     else:
-        print("P frame loss is: ", loss)
+        # print("P frame loss is: ", loss)
         eframe.apply_loss(loss, 1)
         ae_model.update_reference(ref_frame)
         decoded = ae_model.decode_frame(eframe)

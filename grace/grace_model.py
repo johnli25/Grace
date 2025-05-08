@@ -322,12 +322,29 @@ class GraceEntropyCoder:
             bs3, sz3 = self.compress_z(z)
             # print("actually compress")
         total_size = sz1 + sz2 + sz3
-        print("Total encoded bytestream size (bytes):", total_size)
+        # print("Total encoded bytestream size (bytes):", total_size)
         bytestream = bs1 + bs2 + bs3 # NOTE: added this line
-        print("Bytestream size (bytes):", len(bytestream))
+        # print("Bytestream size (bytes):", len(bytestream))
         return bytestream, total_size
 
 
-    def entropy_decode(self):
-        raise NotImplementedError
+    def entropy_decode(self, bytestream, shape_mv, shape_res, z):
+        """
+        Parameter:
+            bytestream: the bytestream
+            shape_mv: shape of motion vec
+            shape_res: shape of residual
+        Returns:
+            code: a 1-D torch tensor,
+                  equals to torch.cat([mv.flatten(), residual.flatten()])
+        """
+        mvsize = np.prod(shape_mv)
+        ressize = np.prod(shape_res)
+        assert mvsize + ressize == len(bytestream)
+
+        mv = torch.reshape(bytestream[:mvsize], shape_mv)
+        res = torch.reshape(bytestream[mvsize:], shape_res)
+
+        return mv, res
+
 

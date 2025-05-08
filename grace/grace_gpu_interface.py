@@ -70,8 +70,11 @@ class GraceInterface:
         Returns:
             a number that is the length of encoded bytestream
         """
-        # print("GraceBasicCode code info: ", code.code.shape, code.shapex, code.shapey, code.code.size)
-        return self.ecmodel.entropy_encode(code.code, code.shapex, code.shapey, code.z, use_estimation=False)[1] # toggle use_estimation true or false
+        # return self.ecmodel.entropy_encode(code.code, code.shapex, code.shapey, code.z, use_estimation=False)[1] # toggle use_estimation true or false
+        encoded_stream, encoded_size = self.ecmodel.entropy_encode(code.code, code.shapex, code.shapey, code.z, use_estimation=False)
+        # print("Encoded stream:", encoded_stream)
+        # print("Encoded size:", encoded_size)
+        return encoded_stream, encoded_size
 
     def decode(self, code: GraceBasicCode, refer_frame: torch.Tensor) -> torch.Tensor:
         """

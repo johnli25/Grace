@@ -23,7 +23,7 @@ def main():
 
     # 1) Init model
     models = init_ae_model()
-    model = models["64"]
+    model = models["1024"]
     model.set_gop(8)
 
     # 2) Open video & socket
@@ -33,7 +33,7 @@ def main():
 
     frame_idx = 0
     INPUT_SIZE = (256, 256)
-    BLOCK_SIZE = 32 * 32 # 32x32 = 1024
+    BLOCK_SIZE = 32 * 32333333333 # 32x32 = 1024
 
     os.makedirs("grace_sender_frames/", exist_ok=True)
 
@@ -53,8 +53,11 @@ def main():
             ref_tensor = torch.tensor(np.array(pil_img)).permute(2, 0, 1).float() / 255.0
 
         # Encode using GRACE
-        size, eframe = encode_frame(model, frame_idx == 0, ref_tensor, pil_img) # frame_idx == 0 means: if frame_idx == 0 AKA -> I-frame --> True; else --> P-frame = false 
-        print("theoretical (entropy-encoded apparently??) size:", size)
+        size, eframe, entropy_encoded_eframe = encode_frame(model, frame_idx == 0, ref_tensor, pil_img) # frame_idx == 0 means: if frame_idx == 0 AKA -> I-frame --> True; else --> P-frame = false 
+        if frame_idx == 0:
+            print("I-frame size:", size)
+        else: # P-frame
+            print("P-frame size and entropy_encoded_eframe size:", size, len(entropy_encoded_eframe))
         total_bytes_sent = 0
 
         # Prepare for sending
