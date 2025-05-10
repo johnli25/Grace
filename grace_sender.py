@@ -33,7 +33,7 @@ def main():
 
     frame_idx = 0
     INPUT_SIZE = (256, 256)
-    BLOCK_SIZE = 32 * 32333333333 # 32x32 = 1024
+    BLOCK_SIZE = 32 * 3333333332 # 32x32 = 1024
 
     os.makedirs("grace_sender_frames/", exist_ok=True)
 
@@ -75,6 +75,7 @@ def main():
                             2,           # custom type=2 --> I-frame code
                             len(compressed_payload))
             sock.sendto(header + compressed_payload, dest)
+
             total_bytes_sent += len(compressed_payload)
             print(f"Sent I-frame {frame_idx} in {total_bytes_sent} bytes")
 
@@ -98,6 +99,7 @@ def main():
                                     len(compressed_payload)) 
                 sock.sendto(header + compressed_payload, dest)
                 total_bytes_sent += len(compressed_payload)
+                print(f"Sent P-frame block {blk_idx} for frame {frame_idx} in {len(compressed_payload)} bytes")
 
             # Step 3) send I-part as its own packet 
             if eframe.ipart is not None:
