@@ -7,12 +7,23 @@ import numpy as np
 import cv2
 import os, time
 import random
-
+import torchac
+import sys
 
 def save_img(rgb_tensor, outdir, idx):
     img_array = rgb_tensor.permute(1, 2, 0).cpu().numpy() * 255.0
     img_array = np.clip(img_array, 0, 255).astype(np.uint8)
     Image.fromarray(img_array).save(os.path.join(outdir, f"frame_{idx:04d}.png"))
+
+def split_into_blocks(tensor, block_height=4, block_width=4):
+    """Splits (C, H, W) tensor into spatial (i, j) blocks of shape (C, B, B)"""
+    C, H, W = tensor.shape
+    blocks = []
+    for i in range(0, H, block_height):
+        for j in range(0, W, block_width):
+            block = tensor[:, i:i+block_height, j:j+block_width].clone().contiguous()
+            blocks.append((i, j, block))
+    return blocks
 
 def main():
     parser = argparse.ArgumentParser()
@@ -23,7 +34,7 @@ def main():
 
     # 1) Init model
     models = init_ae_model()
-    model = models["1024"]
+    model = models["128"]
     model.set_gop(8)
 
     # 2) Open video & socket
@@ -33,7 +44,6 @@ def main():
 
     frame_idx = 0
     INPUT_SIZE = (256, 256)
-    BLOCK_SIZE = 32 * 3333333332 # 32x32 = 1024
 
     os.makedirs("grace_sender_frames/", exist_ok=True)
 
@@ -58,73 +68,68 @@ def main():
             print("I-frame size:", size)
         else: # P-frame
             print("P-frame size and entropy_encoded_eframe size:", size, len(entropy_encoded_eframe))
+            print("eframe.code size:", eframe.code.size())
         total_bytes_sent = 0
 
         # Prepare for sending
         if eframe.frame_type == "I":
             # Step 1)
             print("frame_idx", frame_idx, "is an I-frame")
-            # eframe.code is a bytes object
-            raw_bytes = eframe.code                 # already a BPG bytestream
-            compressed_payload = zlib.compress(raw_bytes)
+                # eframe.code is a bytes object
+            raw_bytes = eframe.code # already a BPG bytestream, and so doing zlib.compress() is not necessary (it will make it worse!)
             # pack it as a single “I-frame code” packet (type=2)
-            header = struct.pack("!IIIII",
+            header = struct.pack("!BBBBI",
                             frame_idx,   # which frame
                             1,           # exactly one packet
                             0,           # packet index 0
                             2,           # custom type=2 --> I-frame code
-                            len(compressed_payload))
-            sock.sendto(header + compressed_payload, dest)
+                            len(raw_bytes))
+            sock.sendto(header + raw_bytes, dest)
 
-            total_bytes_sent += len(compressed_payload)
+            total_bytes_sent += len(raw_bytes)
             print(f"Sent I-frame {frame_idx} in {total_bytes_sent} bytes")
 
         else: # P-frame
-            # Step 1.5) 
-            code_flat = eframe.code.flatten()
-            n_blocks = (code_flat.numel() - 1) // BLOCK_SIZE + 1
-            code_blocks = code_flat.split(BLOCK_SIZE)
+            latent = eframe.code.view(32, 32, 32)  # (C, H, W)
+            blocks = split_into_blocks(latent, block_height=8, block_width=4) # (i, j, block)
+            n_blocks = len(blocks)
 
-            # Step 2) Encode subsequent P-frame as blocks
-            print("code blocks:", len(code_blocks))
-            for blk_idx, block in enumerate(code_blocks):
-                payload = pickle.dumps(block) 
-                compressed_payload = zlib.compress(payload)
-
-                header = struct.pack("!IIIII", 
-                                    frame_idx, 
+            print("n_blocks", n_blocks)
+            for blk_idx, (i, j, block) in enumerate(blocks):
+                block_bytes = block.cpu().numpy().astype(np.float16).tobytes()
+                compressed = zlib.compress(block_bytes)
+                header = struct.pack("!BBBBBB", 
+                                    frame_idx,
                                     n_blocks,
-                                    blk_idx, 
-                                    0, # type 0 = P-frame code-block
-                                    len(compressed_payload)) 
-                sock.sendto(header + compressed_payload, dest)
-                total_bytes_sent += len(compressed_payload)
-                print(f"Sent P-frame block {blk_idx} for frame {frame_idx} in {len(compressed_payload)} bytes")
+                                    blk_idx,
+                                    0,        # type = 0 for P-frame code block
+                                    i, j) # i = starting row of the sub-block, j = starting column of the sub-block
+                # print("len of compressed, header, and total", len(compressed), len(header), len(header) + len(compressed), "blk_idx", blk_idx, "i, j", i, j)
+                sock.sendto(header + compressed, dest)
+                total_bytes_sent += len(compressed)
 
             # Step 3) send I-part as its own packet 
             if eframe.ipart is not None:
-                ipayload = pickle.dumps(eframe.ipart) 
-                icompressed_payload = zlib.compress(ipayload)
-                header = struct.pack("!IIIII", 
-                                    frame_idx, 
-                                    1,
-                                    0, # block index 0 for I-part
-                                    1, # type 1 = I-part
-                                    len(icompressed_payload))
-                sock.sendto(header + icompressed_payload, dest)
-                # print(f"Sent I-part for frame {frame_idx} in {len(icompressed_payload)} bytes")
-                total_bytes_sent += len(icompressed_payload) 
-            # print(f"Sent {len(code_blocks)} P-frame blocks for frame {frame_idx} in {total_bytes_sent} bytes")
+                raw_bytes = eframe.ipart.code # already a BPG bytestream, and so doing zlib.compress() is not necessary (it will make it worse!)
+                header = struct.pack("!BBBBI",
+                                frame_idx,   # which frame
+                                1,           # exactly one packet
+                                0,           # packet index 0
+                                1,           # custom type=1 --> I-part/patch
+                                len(raw_bytes))
+                sock.sendto(header + raw_bytes, dest)
+                total_bytes_sent += len(raw_bytes)
+                print(f"Sent I-part/patch {frame_idx} in {len(raw_bytes)} bytes")
 
         end_time = time.monotonic_ns() / 1e6
-        print(f"Sent frame {frame_idx} with {total_bytes_sent} bytes in {end_time - start_time:.6f} ms")
+        print(f"Sent frame {frame_idx} with TOTAL OF {total_bytes_sent} bytes in {end_time - start_time:.6f} ms")
+
 
         # NOTE: OPTIONAL SANITY CHECK: save all frames, simulating receiver
         if frame_idx == 0:
             save_img(ref_tensor, "grace_sender_frames/", frame_idx)
         else:
             loss_ratio = random.random()       # float in [0.0, 1.0)
-            # decode under that simulated loss
             recon = decode_frame(model, eframe, ref_tensor, loss=0)
             ref_tensor = recon.detach() # update reference for the next P‐frame
             save_img(recon, "grace_sender_frames/", frame_idx)
@@ -135,3 +140,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    # NOTE: quick smoke test about pickle's size 
+    # t = torch.arange(32768, dtype=torch.float16)
+    # view = t[0:1024]                 # slice
+    # print(sys.getsizeof(pickle.dumps(view)))  # ~65 kB, not 2 kB!
