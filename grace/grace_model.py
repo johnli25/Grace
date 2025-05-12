@@ -105,6 +105,7 @@ class GraceModel:
         """
         mvsize = np.prod(shape_mv)
         ressize = np.prod(shape_res)
+        print("mvsize", mvsize, "ressize", ressize, "torch.numel(code) shape: ", torch.numel(code))
         assert mvsize + ressize == torch.numel(code)
 
         code = code.to(self.device)
@@ -159,7 +160,6 @@ def encode_float_cdf_with_repeat(cdf_float, sym, repeats, needs_normalization=Tr
     cdf_int = _convert_to_int_and_normalize(cdf_float, needs_normalization)
     cdf_int = cdf_int.repeat(repeats)
     return torchac.encode_int16_normalized_cdf(cdf_int, sym)
-
 
 
 class GraceEntropyCoder:

@@ -302,6 +302,7 @@ class EncodedFrame:
         """
         default block size is 100
         """
+        print("[grace-gpu] (not grace_gpu_new_version): apply_loss: loss_ratio = ", loss_ratio)
         leng = torch.numel(self.code)
         nblocks = (leng - 1) // blocksize + 1
 

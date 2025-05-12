@@ -154,8 +154,8 @@ def bpg_decode(bpg_stream, h, w):
 class IPartFrame:
     def __init__(self, code, shapex, shapey, offset_width, offset_height):
         self.code = code
-        self.shapex = shapex
-        self.shapey = shapey
+        self.shapex = shapex # these appear to be unused??
+        self.shapey = shapey # these appear to be unused??
         self.offset_width = offset_width
         self.offset_height = offset_height
 
@@ -165,8 +165,8 @@ class EncodedFrame:
     """
     def __init__(self, code, shapex, shapey, frame_type, frame_id):
         self.code = code
-        self.shapex = shapex
-        self.shapey = shapey
+        self.shapex = shapex # these appear to be unused??
+        self.shapey = shapey # these appear to be unused??
         self.frame_type = frame_type
         self.frame_id = frame_id
         self.loss_applied = False
@@ -178,6 +178,7 @@ class EncodedFrame:
         """
         default block size is 100
         """
+        print("apply_loss self.code shape:", self.code.shape)
         leng = torch.numel(self.code)
         nblocks = (leng - 1) // blocksize + 1
         print("leng, nblocks, blocksize:", leng, nblocks, blocksize)
@@ -319,7 +320,6 @@ class AEModel:
             # st = time.perf_counter()
             eframe = self.grace_coder.encode(frame, self.reference_frame)
 
-
             # torch.cuda.synchronize()
             # ed = time.perf_counter()
             # print("self.grace_coder.encode: ", (ed - st) * 1000)
@@ -362,9 +362,11 @@ class AEModel:
         """
         if eframe.frame_type == "I":
             # out = self.qmap_coder.decode(eframe.code, eframe.shapex, eframe.shapey)
+            print(type(eframe.code))
             out = bpg_decode(eframe.code, eframe.shapex, eframe.shapey)
             return out
         else:
+            print("hit P-frame")
             assert self.reference_frame is not None
             #out = self.grace_coder.decode(eframe.code, self.reference_frame, eframe.shapex, eframe.shapey)
             # st = time.perf_counter()
@@ -548,15 +550,17 @@ def decode_frame(ae_model: AEModel, eframe: EncodedFrame, ref_frame, loss):
     else:
         if not eframe.frame_type == "I":
             raise RuntimeError("Cannot decode a P-frame without reference frame")
-
+        
+    print(f"[decode_frame in grace_gpu_new_version.py] {type(eframe)} and {eframe.frame_type}")
     if eframe.frame_type == "I":
         if loss > 0:
             print("Error! Cannot add loss on I frame, it will cause huge error!")
         decoded = ae_model.decode_frame(eframe)
         return decoded
     else:
-        # print("P frame loss is: ", loss)
-        eframe.apply_loss(loss, 1)
+        print("P-frame loss is: ", loss)
+        print("Type of eframe:", type(eframe))
+        eframe.apply_loss(loss) 
         ae_model.update_reference(ref_frame)
         decoded = ae_model.decode_frame(eframe)
         return decoded

@@ -19,6 +19,7 @@ from .grace_model import GraceModel, GraceEntropyCoder
 class GraceBasicCode:
     def __init__(self, code, shapex, shapey, z):
         self.code = code
+        print("[GraceBasicCode] code shape:", code.shape)  
         self.shapex = shapex
         self.shapey = shapey
         self.z = z
@@ -26,11 +27,13 @@ class GraceBasicCode:
         self.isize = 0
 
     def apply_loss(self, loss, no_use=None):
+        print("[GraceBasicCode] apply_loss and self.code shape", self.code.shape)
         leng = torch.numel(self.code)
 
         rnd = torch.rand(leng).to(self.code.device)
         rnd = (rnd > loss).long()
         rnd = rnd[:leng].reshape(self.code.shape)
+        print("[GraceBasicCode] amount of ones/zeros in rnd", rnd.sum(), rnd.numel() - rnd.sum())
         self.code = self.code * rnd
 
         if self.ipart is not None and np.random.random() < loss:
@@ -60,6 +63,10 @@ class GraceInterface:
             code: the GraceBasicCode, can be used for decode and entropy encode
         """
         code, shapex, shapey, z = self.gracemodel.encode(image, refer_frame, return_z = True)
+        print("[GraceInterface] code shape:", code.shape)
+        print("[GraceInterface] z:", z.shape)
+        print("[GraceInterface] shapex:", shapex)
+        print("[GraceInterface] shapey:", shapey)
         return GraceBasicCode(code, shapex, shapey, z)
 
     def entropy_encode(self, code: GraceBasicCode):

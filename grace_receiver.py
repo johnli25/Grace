@@ -1,126 +1,175 @@
-# grace_receiver.py
-import argparse, socket, struct, zlib, os, json, time
-import cv2, torch, numpy as np
-from models import PNC32, PNC32Encoder, ConvLSTM_AE          # same as sender
-from matplotlib import pyplot as plt                         # only if you want quick plots
-from torchvision.utils import save_image
+import argparse, socket, struct, zlib, os, time
+import numpy as np
+import torch
 
-# ---------- util -----------------------------------------------------------
+# Grace helper -------------------------------------------------------------
+from grace_gpu_new_version import init_ae_model, decode_frame   # same module as sender
+from grace_gpu_new_version import EncodedFrame, IPartFrame      # classes defined there
+from grace.grace_gpu_interface import GraceBasicCode
+from PIL import Image
 
-def load_model(model_name, model_path, device, lstm_kwargs=None):
-    ckpt = torch.load(model_path, map_location=device)
-    if isinstance(ckpt, torch.nn.Module):
-        model = ckpt
-    else:
-        if model_name == "pnc32":
-            model = PNC32()
-        elif model_name == "conv_lstm_PNC32_ae":
-            if lstm_kwargs is None:
-                raise ValueError("--lstm_kwargs required for ConvLSTM_AE")
-            model = ConvLSTM_AE(**lstm_kwargs)
-        else:
-            raise ValueError(f"Unknown model {model_name}")
-        # strip “module.” if trained with DataParallel
-        ckpt = {k.replace("module.", "", 1): v for k, v in ckpt.items()}
-        model.load_state_dict({k: v for k, v in ckpt.items()
-                               if k in model.state_dict()})
-    return model.to(device).eval()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+models = init_ae_model()        # load once
+model  = models["128"]          # must match the sender
 
-def save_rgb(t, outdir, idx):
-    os.makedirs(outdir, exist_ok=True)
-    save_image(t, os.path.join(outdir, f"frame_{idx:04d}.png"))
+# packet helpers -----------------------------------------------------------
+HDR_P  = struct.Struct("!BBBBBB")     # P‑block   (6 bytes)
+HDR_I  = struct.Struct("!BBBBI")      # I‑frame / I‑patch (8 bytes)
 
-HEADER_FMT = "!III"           # frame_idx, feat_idx, payload_len  (3×uint32)
-HEADER_SZ  = struct.calcsize(HEADER_FMT)
+BLOCK_H, BLOCK_W = 32, 32              # keep in sync with sender
+C, H, W = 32, 32, 32
 
-def parse_header(buf):
-    """return frame, index, payload_len"""
-    # If you later change to 1‑byte fields, replace HEADER_FMT with "!BBB"
-    return struct.unpack_from(HEADER_FMT, buf, 0)
+I_FULL   = 0  
+P_BLOCK  = 1  
+I_PATCH  = 2  
+
+# NOTE: hardcoded shapex, shapey, z for grace.grace_gpu_interface.GraceBasicCode for P-frame for now!
+shapex_ = ([1, 128, 8, 8])
+shapey_ = ([1, 96, 16, 16])
+z_ = torch.zeros((1, 64, 4, 4), dtype=torch.float32, device=device) # NOTE: dummy z_ for now
+
+def parse_p_frame(pkt):
+    frame_idx, num_blocks, blk_idx, _type, i, j = HDR_P.unpack_from(pkt)
+    payload = pkt[HDR_P.size:]
+    return frame_idx, num_blocks, blk_idx, i, j, payload
+
+def parse_i_frame(pkt):
+    """Parse I-frame packet and return the frame data."""
+    frame_idx, _, _, _type, paylen = HDR_I.unpack_from(pkt)
+    payload = pkt[HDR_I.size:HDR_I.size + paylen]   
+    return frame_idx, _type, payload
+
+
+def save_img(rgb_tensor, outdir, idx):
+    img_array = rgb_tensor.permute(1, 2, 0).cpu().numpy() * 255.0
+    img_array = np.clip(img_array, 0, 255).astype(np.uint8)
+    Image.fromarray(img_array).save(os.path.join(outdir, f"frame_{idx:04d}.png"))
+
+
+class FrameBuf:
+    def __init__(self, frame_idx, deadline_ms=1000):
+        self.frame_idx = frame_idx
+        self.num_blocks_expected = 1
+        self.latent = torch.zeros(C, H, W, dtype=torch.float32, device=device) # you can change to torch.float16 if yo uwant
+        self.blocks_received = np.zeros((self.num_blocks_expected,), dtype=bool) # tracks which blocks have been received thus far
+        self.ipart = None # (bytes, i, j) if present
+        self.iframe = None # bytes, only if frame_idx == 0
+
+        self.start_time_ms = time.time() * 1000
+        self.deadline_ms = deadline_ms
+        self.decoded = False
+
+    def add_pblock(self, n_blocks, blk_idx, i, j, payload):
+        if self.num_blocks_expected is None:
+            self.num_blocks_expected = n_blocks
+        block = np.frombuffer(zlib.decompress(payload), dtype=np.float32).reshape(C, BLOCK_H, BLOCK_W)
+        self.latent[:, i:i+BLOCK_H, j:j+BLOCK_W] = torch.from_numpy(block).to(device)
+        self.blocks_received[blk_idx] = True
+    
+    def add_iframe(self, payload):
+        self.iframe = payload
+    
+    def add_ipart(self, payload):
+        self.ipart = payload
+    
+    def ready_to_decode(self):
+        # always decode I-frames immediately--not conditioned on deadlines
+        if self.frame_idx == 0:
+            return self.iframe is not None
+        # for P-frames: decode if EITHER
+        #  1) we got _all_ expected blocks, OR
+        #  2) we’ve hit the deadline
+        all_here = (self.num_blocks_expected is not None
+                    and self.blocks_received.sum() == self.num_blocks_expected)
+        timed_out = (time.time() * 1000 - self.start_time_ms) > self.deadline_ms
+        return all_here or timed_out
+
+
+def decode_framebuf(buf, ref_tensor):
+    """Decode the frame buffer using the reference tensor."""
+    if buf.frame_idx == 0:
+        # I-frame
+        eframe = EncodedFrame(code=buf.iframe, 
+                              shapex=256, shapey=256, # NOTE: shapex and shapey are apparently not used in EncodedFrame in grace_gpu_new_version.py
+                              frame_type="I",
+                              frame_id=buf.frame_idx)
+        rgb = decode_frame(model, eframe, None, loss=0) 
+        return rgb
+    
+    # build EncodedFrame for P-frame
+    # reshape buf.latent from C, H, W to C * H * W 
+    buf.latent = buf.latent.view(C * H * W)
+    eframe = GraceBasicCode(code=buf.latent,
+                            shapex=shapex_,
+                            shapey=shapey_,
+                            z=z_,)    
+    if buf.ipart is not None:
+        # add I-part
+        ipart = IPartFrame(code=buf.ipart,
+                    shapex=128, shapey=128, # NOTE: shapex and shapey are apparently not used in EncodedFrame in grace_gpu_new_version.py
+                    offset_width=0, offset_height=0)
+        eframe.ipart = ipart
+        
+    eframe.frame_type = "P" # dynamically set frame type NOTE: bit of a hack, but it works
+    rgb = decode_frame(model, eframe, ref_tensor, loss=0)
+    return rgb
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--model", required=True, choices=["pnc32", "conv_lstm_PNC32_ae"])
-    ap.add_argument("--model_path", required=True)
-    ap.add_argument("--lstm_kwargs", type=str, default=None)
-    ap.add_argument("--ip",   default="0.0.0.0")
-    ap.add_argument("--port", type=int, required=True)
-    ap.add_argument("--quant", action="store_true",
-                    help="Expect 8‑bit quantised features")
-    ap.add_argument("--save_dir", default=None,
-                    help="Save decoded rgb frames here (optional)")
-    args = ap.parse_args()
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    lstm_kwargs = json.loads(args.lstm_kwargs) if args.lstm_kwargs else None
-    net = load_model(args.model, args.model_path, device, lstm_kwargs)
+    parser = argparse.ArgumentParser(description="GRACE receiver")
+    parser.add_argument("--ip", required=True)
+    parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--deadline_ms", type=float, default=1000, help="Deadline for receiving packets")
+    args = parser.parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((args.ip, args.port))
-    print(f"[receiver] listening on {(args.ip, args.port)}")
+    print(f"Listening on {args.ip}:{args.port}")
+    buffer_map = {}
+    ref_rgb = None
+    frame_cnt = 0
 
-    BUFSIZE = 60_000                       # big enough for one UDP datagram
-    FEATS   = 32                           # number of feature maps
-
-    current_frame = None                   # frame id we are collecting
-    feat_buf      = {}                     # {idx: np.ndarray}
-    start_t       = None
-    frame_counter = 0
+    os.makedirs("grace_receiver_frames/", exist_ok=True)
 
     while True:
-        pkt, _addr = sock.recvfrom(BUFSIZE)
-        if len(pkt) < HEADER_SZ:
-            continue                       # skip garbage
-
-        fid, fidx, paylen = parse_header(pkt)
-        compressed       = pkt[HEADER_SZ:HEADER_SZ+paylen]
-        payload          = zlib.decompress(compressed)
-
-        # ---------------- new frame begins? ----------------
-        if current_frame is None or fid != current_frame:
-            # decode the previous frame if we had collected all 32 features
-            if feat_buf and len(feat_buf) == FEATS:
-                decode_and_show(feat_buf, net, args.quant,
-                                device, frame_counter, args.save_dir)
-                frame_counter += 1
-            # reset for the new frame
-            current_frame = fid
-            feat_buf      = {}
-            start_t       = time.time()
-
-        # store this feature
-        feat_dtype = np.uint8 if args.quant else np.float32
-        feat       = np.frombuffer(payload, dtype=feat_dtype).reshape(32, 32)
-        feat_buf[fidx] = feat
-
-        # If we have all feature‑packets, reconstruct immediately
-        if len(feat_buf) == FEATS:
-            decode_and_show(feat_buf, net, args.quant,
-                            device, frame_counter, args.save_dir)
-            dt = (time.time() - start_t)*1e3
-            print(f"[receiver] decoded frame {fid} in {dt:.1f} ms")
-            frame_counter += 1
-            current_frame = None
-            feat_buf      = {}
-
-# ---------- reconstruction --------------------------------------------------
-def decode_and_show(feat_buf, model, quantised, device, frame_idx, save_dir):
-    # order features by index
-    feats = np.stack([feat_buf[i] for i in range(32)], axis=0)  # (32,32,32)
-    if quantised:
-        feats = feats.astype(np.float32) / 255.0
-    z = torch.from_numpy(feats).unsqueeze(0).to(device)         # (1,32,32,32)
-
-    with torch.no_grad():
-        if hasattr(model, "decoder"):
-            rgb = model.decoder(z)      # (1,3,H,W)
+        pkt, addr = sock.recvfrom(65536)
+        if len(pkt) < HDR_I.size: # could be either header
+            print("Packet too small lol!")
+            continue
+        # else
+        type_byte = pkt[3] # 4th unsigned char in both headers
+        if type_byte in (I_FULL, I_PATCH):
+            frame_idx, type_, payload = parse_i_frame(pkt)
+            fb = buffer_map.setdefault(frame_idx, FrameBuf(frame_idx)) # .setdefault() creates a new FrameBuf if not present OR returns the existing one
+            print(f"Received I-frame {frame_idx} of type {type_}")
+            if type_ == I_FULL:
+                fb.add_iframe(payload)
+            if type_ == I_PATCH: 
+                fb.add_ipart(payload)
         else:
-            rgb = model.decode(z)
+            frame_idx, n_blocks, blk_idx, i, j, payload = parse_p_frame(pkt)
+            print(f"Received P-block {blk_idx} for frame {frame_idx} at ({i}, {j})")
+            fb = buffer_map.setdefault(frame_idx, FrameBuf(frame_idx))
+            fb.add_pblock(n_blocks, blk_idx, i, j, payload)
 
-    rgb = rgb.clamp(0, 1)
-    if save_dir:
-        save_rgb(rgb, save_dir, frame_idx)
+        # ready to decode yet?
+        fb = buffer_map[frame_idx]
+        if not fb.decoded and fb.ready_to_decode():
+            t0 = time.time() * 1000
+            if ref_rgb is not None: print(f"[receiver] fb.latent and ref_rgb:", fb.latent.shape, ref_rgb.shape)
+            recon = decode_framebuf(fb, ref_rgb) # NOTE: if fb.frame_idx == 0, ref_rgb is None anyway, and will decode an I-frame
+            print("recon shape:", recon.shape)  
+            print(f"[receiver] Decoded frame {frame_idx} in {time.time() * 1000 - t0:.2f}ms and received {fb.blocks_received.sum()}/{fb.num_blocks_expected} blocks")
 
+            save_img(recon, "grace_receiver_frames/", frame_idx)
+            frame_cnt += 1
+
+            # update reference frame
+            ref_rgb = recon
+            fb.decoded = True
+
+            # drop old buffer to save/recover memory
+            del buffer_map[frame_idx]
+        
 if __name__ == "__main__":
     main()

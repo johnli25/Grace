@@ -10,6 +10,10 @@ import random
 import torchac
 import sys
 
+I_FULL   = 0  
+P_BLOCK  = 1  
+I_PATCH  = 2 
+
 def save_img(rgb_tensor, outdir, idx):
     img_array = rgb_tensor.permute(1, 2, 0).cpu().numpy() * 255.0
     img_array = np.clip(img_array, 0, 255).astype(np.uint8)
@@ -34,7 +38,7 @@ def main():
 
     # 1) Init model
     models = init_ae_model()
-    model = models["128"]
+    model = models["1024"]
     model.set_gop(8)
 
     # 2) Open video & socket
@@ -68,7 +72,7 @@ def main():
             print("I-frame size:", size)
         else: # P-frame
             print("P-frame size and entropy_encoded_eframe size:", size, len(entropy_encoded_eframe))
-            print("eframe.code size:", eframe.code.size())
+            print("P-eframe.code size:", eframe.code.size(), eframe.shapex, eframe.shapey, eframe.z.size())
         total_bytes_sent = 0
 
         # Prepare for sending
@@ -82,7 +86,7 @@ def main():
                             frame_idx,   # which frame
                             1,           # exactly one packet
                             0,           # packet index 0
-                            2,           # custom type=2 --> I-frame code
+                            I_FULL,           # custom type=0 --> I-frame code
                             len(raw_bytes))
             sock.sendto(header + raw_bytes, dest)
 
@@ -90,19 +94,20 @@ def main():
             print(f"Sent I-frame {frame_idx} in {total_bytes_sent} bytes")
 
         else: # P-frame
+            print("[sender] P-frame latent shape", eframe.code.shape)
             latent = eframe.code.view(32, 32, 32)  # (C, H, W)
-            blocks = split_into_blocks(latent, block_height=8, block_width=4) # (i, j, block)
+            blocks = split_into_blocks(latent, block_height=32, block_width=32) # (i, j, block)
             n_blocks = len(blocks)
 
             print("n_blocks", n_blocks)
             for blk_idx, (i, j, block) in enumerate(blocks):
-                block_bytes = block.cpu().numpy().astype(np.float16).tobytes()
+                block_bytes = block.cpu().numpy().astype(np.float32).tobytes()
                 compressed = zlib.compress(block_bytes)
                 header = struct.pack("!BBBBBB", 
                                     frame_idx,
                                     n_blocks,
                                     blk_idx,
-                                    0,        # type = 0 for P-frame code block
+                                    P_BLOCK,        # type = 1 for P-frame code block
                                     i, j) # i = starting row of the sub-block, j = starting column of the sub-block
                 # print("len of compressed, header, and total", len(compressed), len(header), len(header) + len(compressed), "blk_idx", blk_idx, "i, j", i, j)
                 sock.sendto(header + compressed, dest)
@@ -115,21 +120,29 @@ def main():
                                 frame_idx,   # which frame
                                 1,           # exactly one packet
                                 0,           # packet index 0
-                                1,           # custom type=1 --> I-part/patch
+                                I_PATCH,           # type=2 --> I-part/patch
                                 len(raw_bytes))
                 sock.sendto(header + raw_bytes, dest)
                 total_bytes_sent += len(raw_bytes)
                 print(f"Sent I-part/patch {frame_idx} in {len(raw_bytes)} bytes")
 
+            print("[sender] type eframe", type(eframe))
+            print("[sender] type eframe.code", type(eframe.code))
+            print("[sender] eframe.code shape", eframe.code.shape)
+            print("[sender] eframe.code shapex", eframe.shapex)
+            print("[sender] eframe.code shapey", eframe.shapey)
+            print("[sender] eframe.code z", eframe.z.shape)
+
         end_time = time.monotonic_ns() / 1e6
         print(f"Sent frame {frame_idx} with TOTAL OF {total_bytes_sent} bytes in {end_time - start_time:.6f} ms")
-
 
         # NOTE: OPTIONAL SANITY CHECK: save all frames, simulating receiver
         if frame_idx == 0:
             save_img(ref_tensor, "grace_sender_frames/", frame_idx)
-        else:
+        else: 
             loss_ratio = random.random()       # float in [0.0, 1.0)
+            print(f"[sender] eframe code and ref tensor shapes and type: {eframe.code.shape}, {ref_tensor.shape}, {type(eframe)}, {eframe.frame_type} ")
+            eframe.code.view(32 * 32 * 32)
             recon = decode_frame(model, eframe, ref_tensor, loss=0)
             ref_tensor = recon.detach() # update reference for the next P‐frame
             save_img(recon, "grace_sender_frames/", frame_idx)
@@ -142,6 +155,6 @@ if __name__ == "__main__":
     main()
 
     # NOTE: quick smoke test about pickle's size 
-    # t = torch.arange(32768, dtype=torch.float16)
+    # t = torch.arange(32768, dtype=torch.)
     # view = t[0:1024]                 # slice
     # print(sys.getsizeof(pickle.dumps(view)))  # ~65 kB, not 2 kB!
