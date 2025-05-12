@@ -16,7 +16,7 @@ model  = models["128"]          # must match the sender
 HDR_P  = struct.Struct("!BBBBBB")     # P‑block   (6 bytes)
 HDR_I  = struct.Struct("!BBBBI")      # I‑frame / I‑patch (8 bytes)
 
-BLOCK_H, BLOCK_W = 32, 32              # keep in sync with sender
+BLOCK_H, BLOCK_W = 8, 4              # NOTE: keep in sync with sender! 
 C, H, W = 32, 32, 32
 
 I_FULL   = 0  
@@ -49,7 +49,7 @@ def save_img(rgb_tensor, outdir, idx):
 class FrameBuf:
     def __init__(self, frame_idx, deadline_ms=1000):
         self.frame_idx = frame_idx
-        self.num_blocks_expected = 1
+        self.num_blocks_expected = 32
         self.latent = torch.zeros(C, H, W, dtype=torch.float32, device=device) # you can change to torch.float16 if yo uwant
         self.blocks_received = np.zeros((self.num_blocks_expected,), dtype=bool) # tracks which blocks have been received thus far
         self.ipart = None # (bytes, i, j) if present

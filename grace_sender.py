@@ -96,7 +96,7 @@ def main():
         else: # P-frame
             print("[sender] P-frame latent shape", eframe.code.shape)
             latent = eframe.code.view(32, 32, 32)  # (C, H, W)
-            blocks = split_into_blocks(latent, block_height=32, block_width=32) # (i, j, block)
+            blocks = split_into_blocks(latent, block_height=8, block_width=4) # (i, j, block)
             n_blocks = len(blocks)
 
             print("n_blocks", n_blocks)
@@ -112,6 +112,17 @@ def main():
                 # print("len of compressed, header, and total", len(compressed), len(header), len(header) + len(compressed), "blk_idx", blk_idx, "i, j", i, j)
                 sock.sendto(header + compressed, dest)
                 total_bytes_sent += len(compressed)
+
+            # compressed = zlib.compress(eframe.code.cpu().numpy().astype(np.float32).tobytes())
+            # header = struct.pack("!BBBBBB", 
+            #                     frame_idx,
+            #                     0,
+            #                     0,
+            #                     P_BLOCK,        # type = 1 for P-frame code block
+            #                     0, 0) # i = starting row of the sub-block, j = starting column of the sub-block
+            # # print("len of compressed, header, and total", len(compressed), len(header), len(header) + len(compressed), "blk_idx", blk_idx, "i, j", i, j)
+            # sock.sendto(header + compressed, dest)
+            # total_bytes_sent += len(compressed)
 
             # Step 3) send I-part as its own packet 
             if eframe.ipart is not None:
