@@ -85,7 +85,7 @@ class FrameBuf:
         return all_here or timed_out
 
 
-def decode_framebuf(buf, ref_tensor):
+def decode_framebuf(buf : FrameBuf, ref_tensor: torch.Tensor):
     """Decode the frame buffer using the reference tensor."""
     if buf.frame_idx == 0:
         # I-frame
@@ -97,8 +97,28 @@ def decode_framebuf(buf, ref_tensor):
         return rgb
     
     # build EncodedFrame for P-frame
-    # reshape buf.latent from C, H, W to C * H * W 
-    buf.latent = buf.latent.view(C * H * W)
+    
+
+    ##### Save buf.latent to a .txt file with its 3D structure
+    latent_np = buf.latent.cpu().numpy()  # Convert to NumPy array
+    with open("receiver_latent_3d.txt", "w") as f:
+        for channel in range(latent_np.shape[0]):  # Iterate over channels (C)
+            f.write(f"Channel {channel}:\n")
+            np.savetxt(f, latent_np[channel], fmt="%.16f")  # Save each 2D slice (H x W)
+            f.write("\n")  # Add a blank line between channels
+    print("3D latent tensor saved to receiver_latent_3d.txt")
+    ##### 
+
+    buf.latent = buf.latent.view(C * H * W) # reshape buf.latent from C, H, W to C * H * W 
+
+    # latent_np = buf.latent.cpu().numpy()  # Convert to NumPy array
+    # with open("almost_flattened_receiver_latent_3d.txt", "w") as f:
+    #     for channel in range(latent_np.shape[0]):  # Iterate over channels (C)
+    #         f.write(f"Channel {channel}:\n")
+    #         np.savetxt(f, latent_np[channel], fmt="%.6f")  # Save each 2D slice (H x W)
+    #         f.write("\n")  # Add a blank line between channels
+    # print("3D latent tensor saved to receiver_latent_3d.txt")
+
     eframe = GraceBasicCode(code=buf.latent,
                             shapex=shapex_,
                             shapey=shapey_,
@@ -111,8 +131,9 @@ def decode_framebuf(buf, ref_tensor):
         eframe.ipart = ipart
         
     eframe.frame_type = "P" # dynamically set frame type NOTE: bit of a hack, but it works
-    rgb = decode_frame(model, eframe, ref_tensor, loss=0)
-    return rgb
+    print(f"[receiver] eframe code and ref tensor shapes and type: {eframe.code.shape}, {ref_tensor.shape}, {type(eframe)}, {eframe.frame_type} ")
+    recon = decode_frame(model, eframe, ref_tensor, loss=0)
+    return recon
 
 
 def main():
@@ -158,7 +179,6 @@ def main():
             t0 = time.time() * 1000
             if ref_rgb is not None: print(f"[receiver] fb.latent and ref_rgb:", fb.latent.shape, ref_rgb.shape)
             recon = decode_framebuf(fb, ref_rgb) # NOTE: if fb.frame_idx == 0, ref_rgb is None anyway, and will decode an I-frame
-            print("recon shape:", recon.shape)  
             print(f"[receiver] Decoded frame {frame_idx} in {time.time() * 1000 - t0:.2f}ms and received {fb.blocks_received.sum()}/{fb.num_blocks_expected} blocks")
 
             save_img(recon, "grace_receiver_frames/", frame_idx)

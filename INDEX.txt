@@ -2,6 +2,14 @@
 videos/testvideos/diving7_224x224.mp4
 videos/testvideos/Golf-Swing-Front005_224x224.mp4
 videos/testvideos/Kicking-Front003_224x224.mp4
+../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Lifting002.mp4
+../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Riding-Horse006.mp4
+../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Run-Side001.mp4
+../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/SkateBoarding-Front003.mp4
+../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Swing-Bench016.mp4
+../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Swing-SideAngle006.mp4
+../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Walk-Front021.mp4
+
 # videos/testvideos/diving7_720x404.mp4
 
 # videos/testvideos/video-1.mp4

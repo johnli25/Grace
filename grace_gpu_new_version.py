@@ -58,9 +58,9 @@ def SSIM(Y1_raw, Y1_com):
     #y1 = Y1_raw.permute([1,2,0]).cpu().detach().numpy()
     #y2 = Y1_com.permute([1,2,0]).cpu().detach().numpy()
     #return ssim(y1, y2, multichannel=True)
-    # Y1_raw = resize_to_224(Y1_raw).float().cuda().unsqueeze(0)
-    # Y1_com = resize_to_224(Y1_com).float().unsqueeze(0)
-    return float(ssim( Y1_raw.float().cuda().unsqueeze(0), Y1_com.float().unsqueeze(0), data_range=1, size_average=False).cpu().detach()) 
+    Y1_raw = resize_to_224(Y1_raw).float().cuda().unsqueeze(0)
+    Y1_com = resize_to_224(Y1_com).float().cuda().unsqueeze(0)
+    return float(ssim(Y1_raw, Y1_com, data_range=1, size_average=False).cpu().detach())
 
 
 METRIC_FUNC = PSNR
@@ -510,7 +510,7 @@ def init_ae_model(qmap_quality=1):
             "512": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/512_freeze.model"}, scale_factor=0.5)),
             "1024": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/1024_freeze.model"}, scale_factor=0.5)),
             "2048": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/2048_freeze.model"})),
-            "4096": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/4096_freeze.model"})),
+            # "4096": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/4096_freeze.model"})),
             # "6144": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/6144_freeze.model"})),
             # "8192": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/8192_freeze.model"})),
             # "12288": AEModel(qmap_coder, GraceInterface({"path": f"{GRACE_MODEL}/12288_freeze.model"})),
@@ -580,7 +580,7 @@ def encode_whole_video(frames, ae_model: AEModel, output_dir="results/grace"):
     ref_frame = None
 
     for idx, frame in enumerate(frames):
-        size, eframe = encode_frame(ae_model, idx == 0, ref_frame, frame)
+        size, eframe, _ = encode_frame(ae_model, idx == 0, ref_frame, frame)
         eframe.tot_size = size
         print("eframes total size is: ", eframe.tot_size, "\n")
         decoded_frame = decode_frame(ae_model, eframe, ref_frame, 0)
@@ -658,9 +658,9 @@ def run_one_model(model_id, input_pil_frames, video_id=0, video_name=""):
     # pnsrs, bpps = model.encode_video(input_pil_frames, perfect_iframe=False, use_mpeg=True) # NOTE: I added this
 
     # Save original and decoded frames
-    for idx, (orig, decoded) in enumerate(zip(orig_frames, dec_frames)):
-        save_image(orig, os.path.join(orig_dir, f"orig-{idx:04d}.png"))
-        save_image(decoded, os.path.join(decoded_dir, f"decoded-{idx:04d}.png"))
+    # for idx, (orig, decoded) in enumerate(zip(orig_frames, dec_frames)):
+        # save_image(orig, os.path.join(orig_dir, f"orig-{idx:04d}.png"))
+        # save_image(decoded, os.path.join(decoded_dir, f"decoded-{idx:04d}.png"))
 
     # Create videos from saved frames
     # os.system(f"ffmpeg -y -r {10} -i {orig_dir}/orig-%04d.png -c:v libx264 {orig_dir}/output.mp4")
@@ -700,8 +700,8 @@ def run_one_model(model_id, input_pil_frames, video_id=0, video_name=""):
 
                 # Save damaged frames
                 # print("length of damaged and damaged_frames:", nframe, len(damaged), len(damaged_frames))
-                for idx, damaged_frame in enumerate(damaged):
-                    save_image(damaged_frame, os.path.join(loss_dir, f"damaged-{frame_id+idx:04d}.png"))
+                # for idx, damaged_frame in enumerate(damaged):
+                    # save_image(damaged_frame, os.path.join(loss_dir, f"damaged-{frame_id+idx:04d}.png"))
 
             # Create damaged video
             # os.system(f"ffmpeg -y -r {10} -i {loss_dir}/damaged-%04d.png -c:v libx264 {loss_dir}/output.mp4")
@@ -715,7 +715,7 @@ def run_one_model(model_id, input_pil_frames, video_id=0, video_name=""):
             df["nframes"] = nframe
             dfs.append(df)
         return pd.concat(dfs)
-    print("len(input_pil_frames):", len(input_pil_frames))
+    
     dfs += [run_multi_frame_losses(1, len(input_pil_frames))] # instead of 16, use the total number of frames in video (denoted by len(input_pil_frames))!
     dfs += [run_multi_frame_losses(3, len(input_pil_frames))]
     dfs += [run_multi_frame_losses(5, len(input_pil_frames))]
@@ -763,7 +763,7 @@ def run_one_file(index_file, output_dir):
     for idx, video in enumerate(videos):
         print(f"\033[33mRunning video: {video}, index: {idx}\033[0m")
         video_basename = os.path.basename(video)
-        if os.path.exists(f"{output_dir}/{video_basename}_v_resized224.csv"):
+        if False and os.path.exists(f"{output_dir}/{video_basename}_v_resized224.csv"):
             print(f"Skip the finished video: {video}")
             video_df = pd.read_csv(f"{output_dir}/{video_basename}_v_resized224.csv")
         else:

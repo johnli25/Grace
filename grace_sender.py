@@ -96,6 +96,17 @@ def main():
         else: # P-frame
             print("[sender] P-frame latent shape", eframe.code.shape)
             latent = eframe.code.view(32, 32, 32)  # (C, H, W)
+
+            ##### Save latent to a .txt file
+            latent_np = latent.cpu().numpy()  # Convert to NumPy array
+            with open("sender_latent_3d.txt", "w") as f:
+                for channel in range(latent_np.shape[0]):  # Iterate over channels (C)
+                    f.write(f"Channel {channel}:\n")
+                    np.savetxt(f, latent_np[channel], fmt="%.16f")  # Save each 2D slice (H x W)
+                    f.write("\n")  # Add a blank line between channels
+            print("[sender] 3D latent tensor saved to sender_latent_3d.txt")
+            ##### 
+            
             blocks = split_into_blocks(latent, block_height=8, block_width=4) # (i, j, block)
             n_blocks = len(blocks)
 
@@ -153,7 +164,6 @@ def main():
         else: 
             loss_ratio = random.random()       # float in [0.0, 1.0)
             print(f"[sender] eframe code and ref tensor shapes and type: {eframe.code.shape}, {ref_tensor.shape}, {type(eframe)}, {eframe.frame_type} ")
-            eframe.code.view(32 * 32 * 32)
             recon = decode_frame(model, eframe, ref_tensor, loss=0)
             ref_tensor = recon.detach() # update reference for the next P‐frame
             save_img(recon, "grace_sender_frames/", frame_idx)
