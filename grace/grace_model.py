@@ -111,6 +111,7 @@ class GraceModel:
         code = code.to(self.device)
         mv = torch.reshape(code[:mvsize], shape_mv)
         res = torch.reshape(code[mvsize:], shape_res)
+        print("[GraceModel] mv shape:", mv.shape, "res shape:", res.shape)
 
         return self.decode_separate(mv, res, refer_frame)
 

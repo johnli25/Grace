@@ -19,15 +19,15 @@ def save_img(rgb_tensor, outdir, idx):
     img_array = np.clip(img_array, 0, 255).astype(np.uint8)
     Image.fromarray(img_array).save(os.path.join(outdir, f"frame_{idx:04d}.png"))
 
-def split_into_blocks(tensor, block_height=4, block_width=4):
-    """Splits (C, H, W) tensor into spatial (i, j) blocks of shape (C, B, B)"""
-    C, H, W = tensor.shape
-    blocks = []
-    for i in range(0, H, block_height):
-        for j in range(0, W, block_width):
-            block = tensor[:, i:i+block_height, j:j+block_width].clone().contiguous()
-            blocks.append((i, j, block))
-    return blocks
+# def split_into_blocks(tensor, block_height=4, block_width=4):
+#     """Splits (C, H, W) tensor into spatial (i, j) blocks of shape (C, B, B)"""
+#     C, H, W = tensor.shape
+#     blocks = []
+#     for i in range(0, H, block_height):
+#         for j in range(0, W, block_width):
+#             block = tensor[:, i:i+block_height, j:j+block_width].clone().contiguous()
+#             blocks.append((i, j, block))
+#     return blocks
 
 def main():
     parser = argparse.ArgumentParser()
@@ -68,11 +68,6 @@ def main():
 
         # Encode using GRACE
         size, eframe, entropy_encoded_eframe = encode_frame(model, frame_idx == 0, ref_tensor, pil_img) # frame_idx == 0 means: if frame_idx == 0 AKA -> I-frame --> True; else --> P-frame = false 
-        if frame_idx == 0:
-            print("I-frame size:", size)
-        else: # P-frame
-            print("P-frame size and entropy_encoded_eframe size:", size, len(entropy_encoded_eframe))
-            print("P-eframe.code size:", eframe.code.size(), eframe.shapex, eframe.shapey, eframe.z.size())
         total_bytes_sent = 0
 
         # Prepare for sending
@@ -82,88 +77,59 @@ def main():
                 # eframe.code is a bytes object
             raw_bytes = eframe.code # already a BPG bytestream, and so doing zlib.compress() is not necessary (it will make it worse!)
             # pack it as a single “I-frame code” packet (type=2)
-            header = struct.pack("!BBBBI",
+            header = struct.pack("!BBBI",
                             frame_idx,   # which frame
-                            1,           # exactly one packet
                             0,           # packet index 0
-                            I_FULL,           # custom type=0 --> I-frame code
-                            len(raw_bytes))
+                            I_FULL,      # Type=0 for I-frame code block
+                            len(raw_bytes)) # Total bytes in I-frame 
             sock.sendto(header + raw_bytes, dest)
 
             total_bytes_sent += len(raw_bytes)
             print(f"Sent I-frame {frame_idx} in {total_bytes_sent} bytes")
 
         else: # P-frame
-            print("[sender] P-frame latent shape", eframe.code.shape)
-            latent = eframe.code.view(32, 32, 32)  # (C, H, W)
-
-            ##### Save latent to a .txt file
-            latent_np = latent.cpu().numpy()  # Convert to NumPy array
-            with open("sender_latent_3d.txt", "w") as f:
-                for channel in range(latent_np.shape[0]):  # Iterate over channels (C)
-                    f.write(f"Channel {channel}:\n")
-                    np.savetxt(f, latent_np[channel], fmt="%.16f")  # Save each 2D slice (H x W)
-                    f.write("\n")  # Add a blank line between channels
-            print("[sender] 3D latent tensor saved to sender_latent_3d.txt")
-            ##### 
-            
-            blocks = split_into_blocks(latent, block_height=8, block_width=4) # (i, j, block)
-            n_blocks = len(blocks)
-
-            print("n_blocks", n_blocks)
-            for blk_idx, (i, j, block) in enumerate(blocks):
+            BLOCK_SIZE = eframe.code.shape[0] // 32  # 32 blocks per P-frame
+            for i in range(32):
+                # print("[sender] elements: ", i * BLK_SIZE, (i + 1) * BLK_SIZE)
+                block = eframe.code[i * BLOCK_SIZE:(i + 1) * BLOCK_SIZE]  # Extract block
                 block_bytes = block.cpu().numpy().astype(np.float32).tobytes()
                 compressed = zlib.compress(block_bytes)
-                header = struct.pack("!BBBBBB", 
+                header = struct.pack("!BBBB", 
                                     frame_idx,
-                                    n_blocks,
-                                    blk_idx,
-                                    P_BLOCK,        # type = 1 for P-frame code block
-                                    i, j) # i = starting row of the sub-block, j = starting column of the sub-block
-                # print("len of compressed, header, and total", len(compressed), len(header), len(header) + len(compressed), "blk_idx", blk_idx, "i, j", i, j)
+                                    i,  # Block/packet index
+                                    P_BLOCK,  # Type = 1 for P-frame code block
+                                    32)  # Total number of blocks planned to be sent
                 sock.sendto(header + compressed, dest)
                 total_bytes_sent += len(compressed)
-
-            # compressed = zlib.compress(eframe.code.cpu().numpy().astype(np.float32).tobytes())
-            # header = struct.pack("!BBBBBB", 
-            #                     frame_idx,
-            #                     0,
-            #                     0,
-            #                     P_BLOCK,        # type = 1 for P-frame code block
-            #                     0, 0) # i = starting row of the sub-block, j = starting column of the sub-block
-            # # print("len of compressed, header, and total", len(compressed), len(header), len(header) + len(compressed), "blk_idx", blk_idx, "i, j", i, j)
-            # sock.sendto(header + compressed, dest)
-            # total_bytes_sent += len(compressed)
-
+            
             # Step 3) send I-part as its own packet 
             if eframe.ipart is not None:
                 raw_bytes = eframe.ipart.code # already a BPG bytestream, and so doing zlib.compress() is not necessary (it will make it worse!)
-                header = struct.pack("!BBBBI",
+                header = struct.pack("!BBBI",
                                 frame_idx,   # which frame
-                                1,           # exactly one packet
                                 0,           # packet index 0
-                                I_PATCH,           # type=2 --> I-part/patch
-                                len(raw_bytes))
+                                I_PATCH,      # Type=0 for I-frame code block
+                                len(raw_bytes)) # Total bytes in I-part 
                 sock.sendto(header + raw_bytes, dest)
                 total_bytes_sent += len(raw_bytes)
                 print(f"Sent I-part/patch {frame_idx} in {len(raw_bytes)} bytes")
 
-            print("[sender] type eframe", type(eframe))
-            print("[sender] type eframe.code", type(eframe.code))
-            print("[sender] eframe.code shape", eframe.code.shape)
-            print("[sender] eframe.code shapex", eframe.shapex)
-            print("[sender] eframe.code shapey", eframe.shapey)
-            print("[sender] eframe.code z", eframe.z.shape)
+            # print("[sender] type eframe", type(eframe))
+            # print("[sender] type eframe.code", type(eframe.code))
+            # print("[sender] eframe.code shape", eframe.code.shape)
+            # print("[sender] eframe.code shapex", eframe.shapex)
+            # print("[sender] eframe.code shapey", eframe.shapey)
+            # print("[sender] eframe.code z", eframe.z.shape)
 
         end_time = time.monotonic_ns() / 1e6
-        print(f"Sent frame {frame_idx} with TOTAL OF {total_bytes_sent} bytes in {end_time - start_time:.6f} ms")
+        print(f"Sent frame {frame_idx} (0 = I-frame, else P-frame) with TOTAL OF {total_bytes_sent} bytes in {end_time - start_time:.6f} ms")
 
-        # NOTE: OPTIONAL SANITY CHECK: save all frames, simulating receiver
+        # NOTE: OPTIONAL SANITY CHECK: save all frames on sender, simulating receiver
         if frame_idx == 0:
             save_img(ref_tensor, "grace_sender_frames/", frame_idx)
         else: 
             loss_ratio = random.random()       # float in [0.0, 1.0)
-            print(f"[sender] eframe code and ref tensor shapes and type: {eframe.code.shape}, {ref_tensor.shape}, {type(eframe)}, {eframe.frame_type} ")
+            # print(f"[sender] eframe code and ref tensor shapes and type: {eframe.code.shape}, {ref_tensor.shape}, {type(eframe)}, {eframe.frame_type} ")
             recon = decode_frame(model, eframe, ref_tensor, loss=0)
             ref_tensor = recon.detach() # update reference for the next P‐frame
             save_img(recon, "grace_sender_frames/", frame_idx)

@@ -362,11 +362,9 @@ class AEModel:
         """
         if eframe.frame_type == "I":
             # out = self.qmap_coder.decode(eframe.code, eframe.shapex, eframe.shapey)
-            print(type(eframe.code))
             out = bpg_decode(eframe.code, eframe.shapex, eframe.shapey)
             return out
         else:
-            print("hit P-frame")
             assert self.reference_frame is not None
             #out = self.grace_coder.decode(eframe.code, self.reference_frame, eframe.shapex, eframe.shapey)
             # st = time.perf_counter()
@@ -551,15 +549,13 @@ def decode_frame(ae_model: AEModel, eframe: EncodedFrame, ref_frame, loss):
         if not eframe.frame_type == "I":
             raise RuntimeError("Cannot decode a P-frame without reference frame")
         
-    print(f"[decode_frame in grace_gpu_new_version.py] {type(eframe)} and {eframe.frame_type}")
     if eframe.frame_type == "I":
         if loss > 0:
             print("Error! Cannot add loss on I frame, it will cause huge error!")
         decoded = ae_model.decode_frame(eframe)
         return decoded
-    else:
-        print("P-frame loss is: ", loss)
-        print("Type of eframe:", type(eframe))
+    else: # if P-frame
+        print("Type of eframe:", type(eframe)) # type is GraceBasicCode
         eframe.apply_loss(loss) 
         ae_model.update_reference(ref_frame)
         decoded = ae_model.decode_frame(eframe)
