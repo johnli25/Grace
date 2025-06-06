@@ -78,9 +78,10 @@ class FrameBuf:
         if self.frame_idx == 0:
             return self.iframe is not None
         # for P-frames: decode if EITHER
-        #  1) we got _all_ expected blocks, OR
+        #  1) we got ALL expected blocks OR
         #  2) we’ve hit the deadline
-        all_here = (sum(self.blocks_received) == self.num_pframe_pkts)  
+        all_here = (sum(self.blocks_received) == self.num_pframe_pkts)  # NOTE: keep all_here if you want to decode when you receive all P-frame blocks 
+        ipart_received = True if self.ipart else False # NOTE: keep ipart_received if you want to decode when you receive the I-part
         timed_out = (time.time() * 1000 - self.start_time_ms) > self.deadline_ms
         return all_here or timed_out
 
@@ -102,6 +103,7 @@ def decode_framebuf(buf : FrameBuf, ref_tensor: torch.Tensor):
                             shapey=shapey_,
                             z=z_,)    
     if buf.ipart is not None:
+        print("[receiver] HIT/Adding I-part to P-frame")
         # add I-part
         ipart = IPartFrame(code=buf.ipart,
                     shapex=128, shapey=128, # NOTE: shapex and shapey are apparently not used in EncodedFrame in grace_gpu_new_version.py

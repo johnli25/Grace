@@ -39,7 +39,7 @@ def main():
     # 1) Init model
     models = init_ae_model()
     model = models["1024"]
-    model.set_gop(8)
+    model.set_gop(52)
 
     # 2) Open video & socket
     cap = cv2.VideoCapture(args.input)
@@ -118,6 +118,7 @@ def main():
                                 len(raw_bytes)) # Total bytes in I-part 
                 sock.sendto(header + raw_bytes, dest)
                 total_bytes_sent += len(raw_bytes)
+                print(f"Sent I-part of P-frame {frame_idx} in {len(raw_bytes)} bytes")
 
             # print("[sender] type eframe", type(eframe))
             # print("[sender] type eframe.code", type(eframe.code))
@@ -130,14 +131,19 @@ def main():
         print(f"Sent frame {frame_idx} (0 = I-frame, else P-frame) with TOTAL OF {total_bytes_sent} bytes in {end_time - start_time:.6f} ms")
 
         # NOTE: OPTIONAL SANITY CHECK: save all frames on sender, simulating receiver
-        if frame_idx == 0:
-            save_img(ref_tensor, "grace_sender_frames/", frame_idx)
-        else: 
-            loss_ratio = random.random()       # float in [0.0, 1.0)
-            # print(f"[sender] eframe code and ref tensor shapes and type: {eframe.code.shape}, {ref_tensor.shape}, {type(eframe)}, {eframe.frame_type} ")
-            recon = decode_frame(model, eframe, ref_tensor, loss=0)
-            ref_tensor = recon.detach() # update reference for the next P‐frame
-            save_img(recon, "grace_sender_frames/", frame_idx)
+        eframe.ipart = None # NOTE: ignore I-parts for now for simplicity LOL
+        recon = decode_frame(model, eframe, ref_tensor, loss=0)  
+        save_img(recon, "grace_sender_frames/", frame_idx)
+        ref_tensor = recon.detach()  # update reference for the next P-frame
+
+        # if frame_idx == 0:
+        #     save_img(ref_tensor, "grace_sender_frames/", frame_idx)
+        # else: 
+        #     loss_ratio = random.random()       # float in [0.0, 1.0)
+        #     # print(f"[sender] eframe code and ref tensor shapes and type: {eframe.code.shape}, {ref_tensor.shape}, {type(eframe)}, {eframe.frame_type} ")
+        #     recon = decode_frame(model, eframe, ref_tensor, loss=0)
+        #     ref_tensor = recon.detach() # update reference for the next P‐frame
+        #     save_img(recon, "grace_sender_frames/", frame_idx)
 
         frame_idx += 1
 
