@@ -44,6 +44,12 @@ def main():
     # 2) Open video & socket
     cap = cv2.VideoCapture(args.input)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    DESIRED_BUF_SIZE = 2**21
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, DESIRED_BUF_SIZE)
+
+    sndbuf = sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)
+    print(f"[socket] SNDBUF size: {sndbuf} bytes")
+
     dest = (args.ip, args.port)
 
     frame_idx = 0
@@ -112,7 +118,6 @@ def main():
                                 len(raw_bytes)) # Total bytes in I-part 
                 sock.sendto(header + raw_bytes, dest)
                 total_bytes_sent += len(raw_bytes)
-                print(f"Sent I-part/patch {frame_idx} in {len(raw_bytes)} bytes")
 
             # print("[sender] type eframe", type(eframe))
             # print("[sender] type eframe.code", type(eframe.code))

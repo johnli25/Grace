@@ -60,8 +60,8 @@ class FrameBuf:
         self.decoded = False
 
     def add_pblock(self, n_pframe_pkts, blk_pkt_i, payload):
-        BLOCK_SIZE = self.latent_pframe.shape[0] // n_pframe_pkts # e.g. BLOCK_SIZE = 32768 / 32 = 1024
         self.num_pframe_pkts = n_pframe_pkts
+        BLOCK_SIZE = self.latent_pframe.shape[0] // n_pframe_pkts # e.g. BLOCK_SIZE = 32768 / 32 = 1024
         block = np.frombuffer(zlib.decompress(payload), dtype=np.float32)
 
         self.latent_pframe[blk_pkt_i * BLOCK_SIZE : (blk_pkt_i + 1) * BLOCK_SIZE] = torch.tensor(block, dtype=torch.float32, device=device)
@@ -93,9 +93,10 @@ def decode_framebuf(buf : FrameBuf, ref_tensor: torch.Tensor):
                               shapex=256, shapey=256, # NOTE: shapex and shapey are apparently not used in EncodedFrame in grace_gpu_new_version.py (not 100% sure)
                               frame_type="I",
                               frame_id=buf.frame_idx)
-        rgb = decode_frame(model, eframe, None, loss=0) 
+        rgb = decode_frame(model, eframe, None, loss=0.0) 
         return rgb
 
+    # P-frame:
     eframe = GraceBasicCode(code=buf.latent_pframe,
                             shapex=shapex_,
                             shapey=shapey_,
@@ -109,7 +110,10 @@ def decode_framebuf(buf : FrameBuf, ref_tensor: torch.Tensor):
         
     eframe.frame_type = "P" # dynamically set frame type NOTE: bit of a hack, but it works
     print(f"[receiver] eframe code and ref tensor shapes and type: {eframe.code.shape}, {ref_tensor.shape}, {type(eframe)}, {eframe.frame_type} ")
-    recon = decode_frame(model, eframe, ref_tensor, loss=0)
+    if buf.frame_idx % 5 == 0:
+        recon = decode_frame(model, eframe, ref_tensor, loss=0.0)
+    else:
+        recon = decode_frame(model, eframe, ref_tensor, loss=0.0)
     return recon
 
 
@@ -122,6 +126,14 @@ def main():
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((args.ip, args.port))
+
+    # NOTE: manually update socket buffer sizes!
+    DESIRED_BUF_SIZE = 2**21  # 1 MiB
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, DESIRED_BUF_SIZE)
+
+    rcvbuf = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+    print(f"[socket] RCVBUF size: {rcvbuf} bytes")
+
     print(f"Listening on {args.ip}:{args.port}")
     buffer_map = {}
     ref_rgb = None
@@ -136,7 +148,7 @@ def main():
             frame_idx, type_, payload = parse_i_frame(pkt)
             print("payload length:", len(payload))
             fb = buffer_map.setdefault(frame_idx, FrameBuf(frame_idx=frame_idx, pframe_latent_shape=pframe_latent_shape, deadline_ms=args.deadline_ms)) # .setdefault() creates a new FrameBuf if not present OR returns the existing one
-            print(f"Received I-frame {frame_idx} of type {type_}")
+            print(f"Received I-frame OR I-patch for {frame_idx} of type {type_}")
             if type_ == I_FULL:
                 fb.add_iframe(payload)
             if type_ == I_PATCH: 

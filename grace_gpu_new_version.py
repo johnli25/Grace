@@ -769,7 +769,7 @@ def run_one_file(index_file, output_dir):
             video_dfs.append(video_df)
 
     final_df = pd.concat(video_dfs)
-    final_df.to_csv(f"{output_dir}/all.csv", index=None)
+    final_df.to_csv(f"{output_dir}/all_caesar.csv", index=None)
     return final_df
 
 if __name__ == "__main__":
