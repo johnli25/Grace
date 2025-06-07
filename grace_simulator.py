@@ -15,7 +15,8 @@ def main():
     parser = argparse.ArgumentParser()
     # parser.add_argument("--input", required=True, help="path to video file")
     # parser.add_argument("--outdir", required=True, help="directory to save reconstructed frames")
-    input_dir = "../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Diving-Side001.mp4"
+    # input_dir = "../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Diving-Side001.mp4"
+    input_dir = "../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Golf-Swing-Front005.mp4"
     output_dir = "grace_simulator_frames"
     args = parser.parse_args()
 
@@ -46,7 +47,7 @@ def main():
         if frame_idx == 0:
             save_img(ref_tensor, output_dir, frame_idx)
         else:
-            recon = decode_frame(model, eframe, ref_tensor, loss=0.0)
+            recon = decode_frame(model, eframe, ref_tensor, loss=0.9)
             save_img(recon, output_dir, frame_idx)
             ref_tensor = recon.detach()
 
