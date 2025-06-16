@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, csv, cv2, torch, numpy as np
+import os, csv, cv2, torch, time, numpy as np
 import torch.nn.functional as F
 from PIL import Image
 from pytorch_msssim import ssim
@@ -7,8 +7,8 @@ from grace_gpu_new_version import init_ae_model, encode_frame, decode_frame
 
 # ------------------------------------------------------------------ config ---
 TEST_VIDEOS = {
-    "Golf-Swing-Front005":      "../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Golf-Swing-Front005.mp4",
     "Diving-Side001":           "../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Diving-Side001.mp4",
+    "Golf-Swing-Front005":      "../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Golf-Swing-Front005.mp4",
     "Kicking-Front003":         "../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Kicking-Front003.mp4",
     "Lifting002":               "../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Lifting002.mp4",
     "Riding-Horse006":          "../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Riding-Horse006.mp4",
@@ -19,7 +19,8 @@ TEST_VIDEOS = {
     "Walk-Front021":            "../LRAE-VC/TUCF_sports_action_224x224_mp4_vids/Walk-Front021.mp4",
 }
 
-MODEL_SIZES = [128, 256, 512]                          # GRACE checkpoint IDs
+# MODEL_SIZES = [128, 256, 512, 1024] 
+MODEL_SIZES = [16384]
 LOSS_RATES  = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 BURST_NS    = [1, 5, 10, 20, 1000]                     # 1000 ≅ “all P-frames lossy”
 INPUT_SIZE  = (256, 256)
@@ -38,6 +39,7 @@ def pil2tensor(pil):
 
 # --------------------------------------------------------------- main --------
 if __name__ == "__main__":
+    start_time = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 1) load all GRACE checkpoints once
@@ -80,11 +82,11 @@ if __name__ == "__main__":
                         gt  = pil2tensor(pil).to(device)                # ground-truth tensor
 
                         if idx == 0:                                    # I-frame only once
-                            _, eframe, _ = encode_frame(model, True,  None, pil)
+                            bytes_size, eframe, whatisthis = encode_frame(model, True,  None, pil)
                             out = decode_frame(model, eframe, None, loss=0.0)
                             ref = out.detach()                          # set reference once
                         else:                                           # P-frame
-                            _, eframe, _ = encode_frame(model, False, ref, pil)
+                            bytes_size, eframe, whatisthis = encode_frame(model, False, ref, pil)
 
                             # drop I-part only when idx % nburst ≠ 0
                             if (idx % nburst) != 0:
@@ -119,9 +121,11 @@ if __name__ == "__main__":
                               f"MSE={mse:.4e}  PSNR={psnr:.2f}  SSIM={ssim_val:.3f}")
 
     # 3) write CSV
-    with open(CSV_FILE, "w", newline="") as fp:
-        writer = csv.DictWriter(fp, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(csv_rows)
+    # with open(CSV_FILE, "w", newline="") as fp:
+    #     writer = csv.DictWriter(fp, fieldnames=fieldnames)
+    #     writer.writeheader()
+    #     writer.writerows(csv_rows)
 
-    print(f"\nAll done  →  metrics written to {CSV_FILE}")
+    # end_time = time.time()
+    # print(f"\nTotal time taken: {end_time - start_time:.2f} seconds")
+    # print(f"\nAll done  →  metrics written to {CSV_FILE}")

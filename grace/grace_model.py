@@ -13,6 +13,7 @@ from torchvision.transforms.functional import to_tensor
 from torchvision.utils import save_image
 from PIL import Image, ImageFile, ImageFilter
 import torchac
+import zlib
 
 class GraceModel:
     """
@@ -107,6 +108,17 @@ class GraceModel:
         ressize = np.prod(shape_res)
         print("mvsize", mvsize, "ressize", ressize, "torch.numel(code) shape: ", torch.numel(code))
         assert mvsize + ressize == torch.numel(code)
+
+        # NOTE: for JOHN: added this for test!
+        code_bytes = code.cpu().numpy().tobytes()
+
+        # Compress using zlib (just to estimate size)
+        compressed_data = zlib.compress(code_bytes)
+        compressed_size = len(compressed_data)
+
+        # Print the estimated compressed size
+        print(f"Estimated compressed size (bytes): {compressed_size}")
+        ### END NOTE for JOhn
 
         code = code.to(self.device)
         mv = torch.reshape(code[:mvsize], shape_mv)

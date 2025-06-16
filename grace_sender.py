@@ -38,7 +38,7 @@ def main():
 
     # 1) Init model
     models = init_ae_model()
-    model = models["1024"]
+    model = models["16384"]
     model.set_gop(52)
 
     # 2) Open video & socket
